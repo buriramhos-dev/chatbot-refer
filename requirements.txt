@@ -1,0 +1,4 @@
+Flask
+line-bot-sdk
+gunicorn  # 💡 ใช้ Gunicorn ในการรัน Production
+google-api-python-client
