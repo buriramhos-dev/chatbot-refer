@@ -101,33 +101,25 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    # event.source.type มีค่าเป็น "user", "group", "room"
-    if event.source.type == "group":
-        print("ข้อความมาจากกลุ่ม")
-        # ตอบข้อความได้ตามปกติ
-    elif event.source.type == "user":
-        print("ข้อความมาจากผู้ใช้ส่วนตัว")
-        # ตอบข้อความ 1-1
-
-
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
     try:
-        if event.source.type not in ["user", "group"]:
+        # เช็กประเภท source
+        if event.source.type == "group":
+            print("📩 ข้อความมาจากกลุ่ม")
+        elif event.source.type == "user":
+            print("📩 ข้อความมาจากผู้ใช้ส่วนตัว")
+
+        if event.source.type not in ["user", "group", "room"]:
             return
 
         text = event.message.text.strip()
         text_lower = text.lower()
         found_districts = [d for d in BURIRAM_DISTRICTS if d.lower() in text_lower]
 
-        # ตรวจว่าผู้ใช้ตอบเวลาแล้วหรือไม่
         time_match = TIME_PATTERN.search(text)
-
         if time_match:
-            # 💡 ถ้าตรวจเจอเวลาจะตอบข้อความยืนยัน
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=f" ล้อหมุนเวลา: {text.strip()} นะคะ ขอบคุณค่ะ")
+                TextSendMessage(text=f"ล้อหมุนเวลา {text.strip()} นะคะ ขอบคุณค่ะ")
             )
             return
 
@@ -138,14 +130,13 @@ def handle_message(event):
 
         results = []
         follow_up = False
-
         for d in found_districts:
             check_result = has_round_for_district(d)
             if check_result:
                 follow_up = True
                 note = check_result["note"].strip()
                 if note:
-                    results.append(f"มีรับกลับของ {d} **({note})**")
+                    results.append(f"มีรับกลับของ {d} ({note})")
                 else:
                     results.append(f"มีรับกลับของ {d}")
             else:
@@ -161,8 +152,10 @@ def handle_message(event):
         print("❌ ERROR in handle_message:", e)
         traceback.print_exc()
         line_bot_api.reply_message(
-            event.reply_token, TextSendMessage(text="เกิดข้อผิดพลาดในการประมวลผลค่ะ 🙏")
+            event.reply_token,
+            TextSendMessage(text="เกิดข้อผิดพลาดในการประมวลผลค่ะ 🙏")
         )
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
