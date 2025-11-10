@@ -139,9 +139,9 @@ def handle_message(event):
                 msg_parts = [f"มีรับกลับของ {d}"]
 
                 if partner_text:
-                    msg_parts.append(partner_text)
+                    msg_parts.append(f"({partner_text})")
                 if note_text:
-                    msg_parts.append(note_text)
+                    msg_parts.append(f"({note_text})")
 
                 results.append(" ".join(msg_parts))
             else:
