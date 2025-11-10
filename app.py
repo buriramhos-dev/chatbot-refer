@@ -91,12 +91,10 @@ def has_round_for_district(district_name):
                 return {
                     "status": color_hex_rgb,
                     "note": note_value,
-                    "partner": partner_text  # เอาข้อความ O มาตอบ
+                    "partner": partner_text
                 }
 
     return None
-
-
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -147,11 +145,16 @@ def handle_message(event):
             check_result = has_round_for_district(d)
             if check_result:
                 follow_up = True
-                note = check_result["note"].strip()
-                if note:
-                    results.append(f"มีรับกลับของ {d} ({note})")
-                else:
-                    results.append(f"มีรับกลับของ {d}")
+                partner_text = check_result["partner"].strip()
+                note_text = check_result["note"].strip()
+                msg_parts = [f"มีรับกลับของ {d}"]
+
+                if partner_text:
+                    msg_parts.append(f"(พันธมิตร: {partner_text})")
+                if note_text:
+                    msg_parts.append(f"หมายเหตุ: {note_text}")
+
+                results.append(" ".join(msg_parts))
             else:
                 results.append(f"ไม่มีรับกลับของ {d}")
 
