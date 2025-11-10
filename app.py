@@ -61,10 +61,8 @@ def update_sheet():
 
 def has_round_for_district(district_name):
     district_name_lower = district_name.lower().strip()
-
-    DISTRICT_COLUMN_INDEX = 11   # ✅ คอลัมน์ K (เขต)
-    O_COLUMN_INDEX = 14          # ✅ คอลัมน์ O
-    P_COLUMN_INDEX = 15          # ✅ คอลัมน์ P (หมายเหตุ)
+    DISTRICT_COLUMN_INDEX = 10
+    NOTE_COLUMN_INDEX = 15
 
     for row_number, cells in latest_sheet_data.items():
         if row_number == '1':
@@ -72,32 +70,20 @@ def has_round_for_district(district_name):
         if len(cells) <= DISTRICT_COLUMN_INDEX:
             continue
 
-        # 📍 อ่านข้อมูลจากคอลัมน์ K
         district_cell = cells[DISTRICT_COLUMN_INDEX]
         district_value = str(district_cell.get("value", "")).lower().strip()
         color_hex_rgb = str(district_cell.get("color", ""))[:7].lower()
 
-        # 🔍 ถ้าชื่ออำเภอตรงกับข้อความในคอลัมน์ K
         if district_name_lower in district_value:
-            # ✅ อ่านค่าจากคอลัมน์ O
-            o_value = ""
-            if len(cells) > O_COLUMN_INDEX:
-                o_cell = cells[O_COLUMN_INDEX]
-                o_value = str(o_cell.get("value", "")).strip()
+            note_value = ""
+            if len(cells) > NOTE_COLUMN_INDEX:
+                note_cell = cells[NOTE_COLUMN_INDEX]
+                note_value = str(note_cell.get("value", "")).strip()
 
-            # ✅ อ่านค่าจากคอลัมน์ P
-            p_value = ""
-            if len(cells) > P_COLUMN_INDEX:
-                p_cell = cells[P_COLUMN_INDEX]
-                p_value = str(p_cell.get("value", "")).strip()
-
-            # ✅ ถ้าช่อง K มีสีฟ้า/เหลือง (มีรับกลับ)
             if color_hex_rgb in allowed_return_trip_colors:
-                combined_note = " ".join(filter(None, [o_value, p_value]))
-                return {"status": color_hex_rgb, "note": combined_note}
+                return {"status": color_hex_rgb, "note": note_value}
 
     return None
-
 
 @app.route("/callback", methods=["POST"])
 def callback():
