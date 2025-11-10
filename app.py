@@ -71,29 +71,31 @@ def has_round_for_district(district_name):
         if len(cells) <= max(DISTRICT_COLUMN_INDEX, PARTNER_COLUMN_INDEX, NOTE_COLUMN_INDEX):
             continue
 
-        # อ่านชื่อโรงพยาบาลจากช่อง K
+        # อ่านชื่ออำเภอ/โรงพยาบาลจากช่อง K
         district_cell = cells[DISTRICT_COLUMN_INDEX]
         district_value = str(district_cell.get("value", "")).lower().strip()
 
         # ถ้าชื่อตรงกับที่ผู้ใช้พิมพ์
         if district_name_lower in district_value:
-            # อ่านสีจากช่องพันธมิตร (O)
+            # อ่านข้อมูลจากคอลัมน์ O
             partner_cell = cells[PARTNER_COLUMN_INDEX]
-            color_hex_rgb = str(partner_cell.get("color", ""))[:7].lower()
+            partner_text = str(partner_cell.get("value", "")).strip()  # ข้อความใน O
+            color_hex_rgb = str(partner_cell.get("color", "")).lower()[:7]  # สีใน O
 
-            # อ่านหมายเหตุ (P)
+            # อ่านหมายเหตุจาก P
             note_cell = cells[NOTE_COLUMN_INDEX]
             note_value = str(note_cell.get("value", "")).strip()
 
-            # ถ้าเป็นสีที่อนุญาต เช่น ฟ้า หรือ เหลือง
+            # ถ้าเป็นสีที่อนุญาต
             if color_hex_rgb in allowed_return_trip_colors:
                 return {
                     "status": color_hex_rgb,
                     "note": note_value,
-                    "partner": str(partner_cell.get("value", "")).strip()
+                    "partner": partner_text  # เอาข้อความ O มาตอบ
                 }
 
     return None
+
 
 
 @app.route("/callback", methods=["POST"])
