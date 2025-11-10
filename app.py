@@ -61,29 +61,40 @@ def update_sheet():
 
 def has_round_for_district(district_name):
     district_name_lower = district_name.lower().strip()
-    DISTRICT_COLUMN_INDEX = 10
-    NOTE_COLUMN_INDEX = 15
+    DISTRICT_COLUMN_INDEX = 10  # คอลัมน์ K
+    PARTNER_COLUMN_INDEX = 14   # คอลัมน์ O
+    NOTE_COLUMN_INDEX = 15      # คอลัมน์ P
 
     for row_number, cells in latest_sheet_data.items():
         if row_number == '1':
             continue
-        if len(cells) <= DISTRICT_COLUMN_INDEX:
+        if len(cells) <= max(DISTRICT_COLUMN_INDEX, PARTNER_COLUMN_INDEX, NOTE_COLUMN_INDEX):
             continue
 
+        # อ่านชื่อโรงพยาบาลจากช่อง K
         district_cell = cells[DISTRICT_COLUMN_INDEX]
         district_value = str(district_cell.get("value", "")).lower().strip()
-        color_hex_rgb = str(district_cell.get("color", ""))[:7].lower()
 
+        # ถ้าชื่อตรงกับที่ผู้ใช้พิมพ์
         if district_name_lower in district_value:
-            note_value = ""
-            if len(cells) > NOTE_COLUMN_INDEX:
-                note_cell = cells[NOTE_COLUMN_INDEX]
-                note_value = str(note_cell.get("value", "")).strip()
+            # อ่านสีจากช่องพันธมิตร (O)
+            partner_cell = cells[PARTNER_COLUMN_INDEX]
+            color_hex_rgb = str(partner_cell.get("color", ""))[:7].lower()
 
+            # อ่านหมายเหตุ (P)
+            note_cell = cells[NOTE_COLUMN_INDEX]
+            note_value = str(note_cell.get("value", "")).strip()
+
+            # ถ้าเป็นสีที่อนุญาต เช่น ฟ้า หรือ เหลือง
             if color_hex_rgb in allowed_return_trip_colors:
-                return {"status": color_hex_rgb, "note": note_value}
+                return {
+                    "status": color_hex_rgb,
+                    "note": note_value,
+                    "partner": str(partner_cell.get("value", "")).strip()
+                }
 
     return None
+
 
 @app.route("/callback", methods=["POST"])
 def callback():
