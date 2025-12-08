@@ -62,25 +62,40 @@ def update_sheet():
 
 def has_round_for_district(district_name):
     district_name_lower = district_name.lower().strip()
-    DISTRICT_COLUMN_INDEX = 10  # คอลัมน์ K
-    PARTNER_COLUMN_INDEX = 14   # คอลัมน์ O
-    NOTE_COLUMN_INDEX = 15      # คอลัมน์ P
+
+    DISTRICT_COLUMN_INDEX = 10  # K
+    PARTNER_COLUMN_INDEX = 14   # O
+    NOTE_COLUMN_INDEX = 15      # P
 
     for row_number, cells in latest_sheet_data.items():
-        if row_number == '1':
+
+        # บังคับให้ row_number เป็น str เสมอ
+        row_number = str(row_number)
+
+        if row_number == "1":
             continue
+
+        # ตรวจว่ามีข้อมูลครบไหม
+        if not isinstance(cells, list):
+            continue
+        
         if len(cells) <= max(DISTRICT_COLUMN_INDEX, PARTNER_COLUMN_INDEX, NOTE_COLUMN_INDEX):
             continue
 
-        district_cell = cells[DISTRICT_COLUMN_INDEX]
+        # กัน null
+        district_cell = cells[DISTRICT_COLUMN_INDEX] or {}
+        partner_cell = cells[PARTNER_COLUMN_INDEX] or {}
+        note_cell = cells[NOTE_COLUMN_INDEX] or {}
+
         district_value = str(district_cell.get("value", "")).lower().strip()
 
         if district_name_lower in district_value:
-            partner_cell = cells[PARTNER_COLUMN_INDEX]
-            partner_text = str(partner_cell.get("value", "")).strip()
-            color_hex_rgb = str(partner_cell.get("color", "")).lower()[:7]
 
-            note_cell = cells[NOTE_COLUMN_INDEX]
+            partner_text = str(partner_cell.get("value", "")).strip()
+
+            # ตัดสีให้เหลือแค่ #xxxxxx
+            color_hex_rgb = (partner_cell.get("color", "") or "").lower()[:7]
+
             note_value = str(note_cell.get("value", "")).strip()
 
             if color_hex_rgb in allowed_return_trip_colors:
