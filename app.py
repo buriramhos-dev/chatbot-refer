@@ -27,7 +27,6 @@ BURIRAM_DISTRICTS = [
     "เมืองยาง", "ชุมพวง"
 ]
 
-# เก็บข้อมูล Sheet ล่าสุด
 latest_sheet_data = {}
 
 # ================== REGEX เวลา ==================
@@ -52,11 +51,12 @@ def update_sheet():
 
     return "OK", 200
 
-# ================== CORE LOGIC (FIX BUG ลำทะเมนชัย) ==================
+# ================== CORE LOGIC (FIXED 100%) ==================
 def has_round_for_district(district_name: str):
     district_lower = district_name.lower().strip()
+    found_any = False  # เคยเจอโรงพยาบาลนี้ไหม
 
-    # ไล่จากแถวบน → ล่าง (ตามลำดับจริงใน Sheet)
+    # ไล่จากแถวบน → ล่าง
     for row_number in sorted(map(int, latest_sheet_data.keys())):
         cells = latest_sheet_data.get(str(row_number))
         if not isinstance(cells, dict):
@@ -66,10 +66,16 @@ def has_round_for_district(district_name: str):
             cells.get("HOSPITAL", {}).get("value", "")
         ).lower().strip()
 
+        if not hospital_value:
+            continue
+
         if district_lower not in hospital_value:
             continue
 
-        # 🔥 เจอชื่อโรงพยาบาลแล้ว = ตัดสินที่แถวนี้ทันที
+        # 👉 เจอโรงพยาบาลนี้แล้ว
+        found_any = True
+
+        # ✅ ถ้าแถวนี้เป็นรับกลับ
         if cells.get("_has_return_trip") is True:
             partner = str(
                 cells.get("พันธมิตร", {}).get("value", "")
@@ -80,14 +86,15 @@ def has_round_for_district(district_name: str):
             ).strip()
 
             return {
-                "partner": partner or "",
-                "note": note or ""
+                "partner": partner,
+                "note": note
             }
 
-        # ❌ เจอชื่อ แต่ไม่ใช่สีฟ้า/เหลือง → ไม่มีรับกลับ
-        return None
+    # ไล่ครบทุกแถวแล้ว
+    if found_any:
+        return None  # มีโรงพยาบาล แต่ไม่มีแถวรับกลับ
 
-    return None
+    return None  # ไม่พบโรงพยาบาลนี้เลย
 
 # ================== LINE CALLBACK ==================
 @app.route("/callback", methods=["POST"])
