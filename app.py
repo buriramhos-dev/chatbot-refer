@@ -38,26 +38,36 @@ TIME_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-# ================== COLOR CHECK ==================
+# ================== COLOR UTILS ==================
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) != 6:
+        return None
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+
 def is_allowed_color(color_hex):
     """
-    ตรวจว่าสีเป็นกลุ่ม ฟ้า / เหลือง หรือไม่
-    รองรับสีธีมจาก Google Sheet
+    ตรวจว่าสีเป็น ฟ้า หรือ เหลือง (รองรับสีอ่อนจาก Google Sheet)
     """
     if not color_hex:
         return False
 
-    color_hex = color_hex.lower()[:7]
+    rgb = hex_to_rgb(color_hex.lower()[:7])
+    if not rgb:
+        return False
 
-    # ฟ้า / ฟ้าอ่อน / cyan
-    if color_hex.startswith(("#00", "#66", "#7f", "#9e")):
-        return True
+    r, g, b = rgb
 
-    # เหลือง
-    if color_hex.startswith("#ff"):
-        return True
+    # 👉 ฟ้า (Blue / Light Blue)
+    is_blue = b > 150 and g > 150 and r < 200
 
-    return False
+    # 👉 เหลือง (Yellow / Light Yellow)
+    is_yellow = r > 200 and g > 200 and b < 180
+
+    print("DEBUG COLOR CHECK:", color_hex, "RGB:", rgb, "BLUE:", is_blue, "YELLOW:", is_yellow)
+
+    return is_blue or is_yellow
 
 # ================== UPDATE FROM SHEET ==================
 @app.route("/update", methods=["POST"])
@@ -106,7 +116,7 @@ def has_round_for_district(district_name):
             note_text = str(note_cell.get("value", "")).strip()
             color_hex = (partner_cell.get("color", "") or "").lower()[:7]
 
-            print("DEBUG COLOR:", district_name, color_hex)
+            print("DEBUG ROW:", row, "DISTRICT:", district_name, "COLOR:", color_hex)
 
             if is_allowed_color(color_hex):
                 return {
