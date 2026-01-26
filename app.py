@@ -27,6 +27,7 @@ BURIRAM_DISTRICTS = [
     "เมืองยาง", "ชุมพวง"
 ]
 
+# 🔹 เก็บข้อมูล Sheet ล่าสุด (ต้อง clear ทุกครั้งที่ update)
 latest_sheet_data = {}
 
 # ================== REGEX เวลา ==================
@@ -48,7 +49,9 @@ def update_sheet():
         return "No JSON data", 400
 
     if "full_sheet_data" in data:
-        latest_sheet_data = data["full_sheet_data"]
+        # 🔥 สำคัญมาก: ล้างข้อมูลเก่าก่อน
+        latest_sheet_data.clear()
+        latest_sheet_data.update(data["full_sheet_data"])
     else:
         return "Invalid data format", 400
 
@@ -59,9 +62,6 @@ def has_round_for_district(district_name: str):
     district_lower = district_name.lower().strip()
 
     for row_number, cells in latest_sheet_data.items():
-
-        if row_number == "1":
-            continue
 
         if not isinstance(cells, dict):
             continue
@@ -74,15 +74,14 @@ def has_round_for_district(district_name: str):
         partner_text = str(partner_cell.get("value", "")).strip()
         note_text = str(note_cell.get("value", "")).strip()
 
-        # 🔹 ค่าที่ Apps Script คำนวณมาให้
+        # 🔹 ใช้ค่าที่ Apps Script คำนวณมาให้โดยตรง
         has_return_trip = cells.get("_has_return_trip") is True
 
-        if district_lower in hospital_value:
-            if has_return_trip:
-                return {
-                    "partner": partner_text,
-                    "note": note_text
-                }
+        if district_lower in hospital_value and has_return_trip:
+            return {
+                "partner": partner_text,
+                "note": note_text
+            }
 
     return None
 
