@@ -27,6 +27,7 @@ BURIRAM_DISTRICTS = [
     "เมืองยาง", "ชุมพวง"
 ]
 
+# เก็บข้อมูล Sheet ล่าสุด
 latest_sheet_data = {}
 
 # ================== REGEX เวลา ==================
@@ -48,16 +49,16 @@ def update_sheet():
 
     latest_sheet_data.clear()
     latest_sheet_data.update(data["full_sheet_data"])
+
     return "OK", 200
 
-# ================== CORE LOGIC ==================
+# ================== CORE LOGIC (FIX BUG ลำทะเมนชัย) ==================
 def has_round_for_district(district_name: str):
     district_lower = district_name.lower().strip()
 
-    # 🔥 ไล่จากแถวบน → ล่าง
-    for row_number in sorted(latest_sheet_data.keys(), key=int):
-        cells = latest_sheet_data[row_number]
-
+    # ไล่จากแถวบน → ล่าง (ตามลำดับจริงใน Sheet)
+    for row_number in sorted(map(int, latest_sheet_data.keys())):
+        cells = latest_sheet_data.get(str(row_number))
         if not isinstance(cells, dict):
             continue
 
@@ -68,7 +69,7 @@ def has_round_for_district(district_name: str):
         if district_lower not in hospital_value:
             continue
 
-        # ✅ เอาเฉพาะแถวที่เป็นสีเหลือง/ฟ้า
+        # 🔥 เจอชื่อโรงพยาบาลแล้ว = ตัดสินที่แถวนี้ทันที
         if cells.get("_has_return_trip") is True:
             partner = str(
                 cells.get("พันธมิตร", {}).get("value", "")
@@ -79,9 +80,12 @@ def has_round_for_district(district_name: str):
             ).strip()
 
             return {
-                "partner": partner,
-                "note": note
+                "partner": partner or "",
+                "note": note or ""
             }
+
+        # ❌ เจอชื่อ แต่ไม่ใช่สีฟ้า/เหลือง → ไม่มีรับกลับ
+        return None
 
     return None
 
@@ -108,7 +112,7 @@ def handle_message(event):
         text_raw = event.message.text.strip()
         text = text_raw.lower()
 
-        # ตรวจเวลา
+        # ตรวจจับเวลา
         if TIME_PATTERN.search(text):
             line_bot_api.reply_message(
                 event.reply_token,
@@ -116,9 +120,12 @@ def handle_message(event):
             )
             return
 
-        found = [d for d in BURIRAM_DISTRICTS if d.lower() in text]
+        found_districts = [
+            d for d in BURIRAM_DISTRICTS
+            if d.lower() in text
+        ]
 
-        if not found:
+        if not found_districts:
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text="❌ กรุณาระบุชื่อโรงพยาบาลในบุรีรัมย์ค่ะ")
@@ -128,7 +135,7 @@ def handle_message(event):
         replies = []
         follow_up = False
 
-        for d in found:
+        for d in found_districts:
             result = has_round_for_district(d)
 
             if result:
