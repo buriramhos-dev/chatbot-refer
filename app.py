@@ -27,9 +27,6 @@ BURIRAM_DISTRICTS = [
     "เมืองยาง", "ชุมพวง"
 ]
 
-# สีที่ถือว่า "มีรับกลับ" (จากโค้ดแรก)
-allowed_return_trip_colors = ["#00ffff", "#ffff00"]
-
 latest_sheet_data = {}
 
 # ================== REGEX เวลา ==================
@@ -52,10 +49,6 @@ def update_sheet():
 
     if "full_sheet_data" in data:
         latest_sheet_data = data["full_sheet_data"]
-
-    elif "row" in data and "row_cells" in data:
-        latest_sheet_data[str(data["row"])] = data["row_cells"]
-
     else:
         return "Invalid data format", 400
 
@@ -73,7 +66,6 @@ def has_round_for_district(district_name: str):
         if not isinstance(cells, dict):
             continue
 
-        # 👉 ใช้ชื่อคอลัมน์
         hospital_cell = cells.get("HOSPITAL", {})
         partner_cell = cells.get("พันธมิตร", {})
         note_cell = cells.get("หมายเหตุ", {})
@@ -82,15 +74,14 @@ def has_round_for_district(district_name: str):
         partner_text = str(partner_cell.get("value", "")).strip()
         note_text = str(note_cell.get("value", "")).strip()
 
-        # 👉 สีดูจากคอลัมน์ "พันธมิตร"
-        partner_color = (partner_cell.get("color", "") or "").lower()[:7]
+        # 🔹 ค่าที่ Apps Script คำนวณมาให้
+        has_return_trip = cells.get("_has_return_trip") is True
 
         if district_lower in hospital_value:
-            if partner_color in allowed_return_trip_colors:
+            if has_return_trip:
                 return {
                     "partner": partner_text,
-                    "note": note_text,
-                    "color": partner_color
+                    "note": note_text
                 }
 
     return None
