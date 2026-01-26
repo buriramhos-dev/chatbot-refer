@@ -51,28 +51,32 @@ def update_sheet():
 
     return "OK", 200
 
-# ================== CORE LOGIC (FIXED 100%) ==================
+# ================== CORE LOGIC ==================
 def has_round_for_district(district_name: str):
     district_lower = district_name.lower().strip()
-    found_any = False  # เคยเจอโรงพยาบาลนี้ไหม
+    district_check = re.sub(r"\s+", "", district_lower)
 
-    # ไล่จากแถวบน → ล่าง
+    found_any = False
+
+    # ไล่จากแถวบน → ล่าง ตามชีตจริง
     for row_number in sorted(map(int, latest_sheet_data.keys())):
         cells = latest_sheet_data.get(str(row_number))
         if not isinstance(cells, dict):
             continue
 
+        # ⚠️ ใช้ hospital ตัวเล็ก (ตรงกับ header ในชีต)
         hospital_value = str(
-            cells.get("HOSPITAL", {}).get("value", "")
+            cells.get("hospital", {}).get("value", "")
         ).lower().strip()
 
         if not hospital_value:
             continue
 
-        if district_lower not in hospital_value:
+        hospital_value = re.sub(r"\s+", "", hospital_value)
+
+        if district_check not in hospital_value:
             continue
 
-        # 👉 เจอโรงพยาบาลนี้แล้ว
         found_any = True
 
         # ✅ ถ้าแถวนี้เป็นรับกลับ
@@ -90,11 +94,8 @@ def has_round_for_district(district_name: str):
                 "note": note
             }
 
-    # ไล่ครบทุกแถวแล้ว
-    if found_any:
-        return None  # มีโรงพยาบาล แต่ไม่มีแถวรับกลับ
-
-    return None  # ไม่พบโรงพยาบาลนี้เลย
+    # มีโรงพยาบาลนี้ แต่ไม่มีแถวรับกลับ
+    return None
 
 # ================== LINE CALLBACK ==================
 @app.route("/callback", methods=["POST"])
@@ -119,7 +120,7 @@ def handle_message(event):
         text_raw = event.message.text.strip()
         text = text_raw.lower()
 
-        # ตรวจจับเวลา
+        # ตรวจเวลา
         if TIME_PATTERN.search(text):
             line_bot_api.reply_message(
                 event.reply_token,
@@ -165,7 +166,9 @@ def handle_message(event):
         messages = [TextSendMessage(text="\n".join(replies))]
 
         if follow_up:
-            messages.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ"))
+            messages.append(
+                TextSendMessage(text="ล้อหมุนกี่โมงคะ")
+            )
 
         line_bot_api.reply_message(event.reply_token, messages)
 
