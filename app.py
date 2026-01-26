@@ -27,7 +27,7 @@ BURIRAM_DISTRICTS = [
     "เมืองยาง", "ชุมพวง"
 ]
 
-# 🔹 เก็บข้อมูล Sheet ล่าสุด (ต้อง clear ทุกครั้งที่ update)
+# 🔹 เก็บข้อมูล Sheet ล่าสุด
 latest_sheet_data = {}
 
 # ================== REGEX เวลา ==================
@@ -45,15 +45,12 @@ def update_sheet():
     global latest_sheet_data
     data = request.json
 
-    if not data:
-        return "No JSON data", 400
-
-    if "full_sheet_data" in data:
-        # 🔥 สำคัญมาก: ล้างข้อมูลเก่าก่อน
-        latest_sheet_data.clear()
-        latest_sheet_data.update(data["full_sheet_data"])
-    else:
+    if not data or "full_sheet_data" not in data:
         return "Invalid data format", 400
+
+    # 🔥 ล้างข้อมูลเก่าทุกครั้ง
+    latest_sheet_data.clear()
+    latest_sheet_data.update(data["full_sheet_data"])
 
     return "OK", 200
 
@@ -61,27 +58,46 @@ def update_sheet():
 def has_round_for_district(district_name: str):
     district_lower = district_name.lower().strip()
 
-    for row_number, cells in latest_sheet_data.items():
+    partners = set()
+    notes = set()
+    has_any_return = False
+
+    for cells in latest_sheet_data.values():
 
         if not isinstance(cells, dict):
             continue
 
-        hospital_cell = cells.get("HOSPITAL", {})
-        partner_cell = cells.get("พันธมิตร", {})
-        note_cell = cells.get("หมายเหตุ", {})
+        hospital_value = str(
+            cells.get("HOSPITAL", {}).get("value", "")
+        ).lower().strip()
 
-        hospital_value = str(hospital_cell.get("value", "")).lower().strip()
-        partner_text = str(partner_cell.get("value", "")).strip()
-        note_text = str(note_cell.get("value", "")).strip()
+        if district_lower not in hospital_value:
+            continue
 
-        # 🔹 ใช้ค่าที่ Apps Script คำนวณมาให้โดยตรง
+        partner_text = str(
+            cells.get("พันธมิตร", {}).get("value", "")
+        ).strip()
+
+        note_text = str(
+            cells.get("หมายเหตุ", {}).get("value", "")
+        ).strip()
+
         has_return_trip = cells.get("_has_return_trip") is True
 
-        if district_lower in hospital_value and has_return_trip:
-            return {
-                "partner": partner_text,
-                "note": note_text
-            }
+        if has_return_trip:
+            has_any_return = True
+
+        if partner_text:
+            partners.add(partner_text)
+
+        if note_text:
+            notes.add(note_text)
+
+    if has_any_return:
+        return {
+            "partner": ", ".join(partners),
+            "note": ", ".join(notes)
+        }
 
     return None
 
@@ -109,7 +125,7 @@ def handle_message(event):
         text = event.message.text.strip()
         text_lower = text.lower()
 
-        # ตรวจเวลา
+        # 🔹 ตรวจเวลา
         if TIME_PATTERN.search(text):
             line_bot_api.reply_message(
                 event.reply_token,
