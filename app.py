@@ -133,9 +133,9 @@ def handle_message(event):
                 follow_up = True
                 msg = f"มีรับกลับของ {d}"
                 if result["partner"]:
-                    msg += f"\n📌 {result['partner']}"
+                    msg += f"\n ({result['partner']})"
                 if result["note"]:
-                    msg += f"\n📝 {result['note']}"
+                    msg += f"\n ({result['note']})"
             else:
                 msg = f"ไม่มีรับกลับของ {d}"
 
