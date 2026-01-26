@@ -7,31 +7,29 @@ import os
 from dotenv import load_dotenv
 import re
 
-# โหลดค่า environment variables จากไฟล์ .env
+# ================== LOAD ENV ==================
 load_dotenv()
 
 app = Flask(__name__)
 
-# ดึงค่า token และ secret จาก environment
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN, timeout=15)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
+# ================== CONSTANT ==================
 BURIRAM_DISTRICTS = [
     "เมืองบุรีรัมย์", "คูเมือง", "กระสัง", "นางรอง", "หนองกี่",
     "ละหานทราย", "ประโคนชัย", "บ้านกรวด", "พุทไธสง", "ลำปลายมาศ",
     "สตึก", "บ้านด่าน", "ห้วยราช", "โนนสุวรรณ", "ปะคำ",
     "นาโพธิ์", "หนองหงส์", "พลับพลาชัย", "เฉลิมพระเกียรติ", "ชำนิ",
-    "บ้านใหม่ไชยพจน์", "โนนดินแดง", "แคนดง", "ลำทะเมนชัย", "เมืองยาง"
-    ,"ชุมพวง"
+    "บ้านใหม่ไชยพจน์", "โนนดินแดง", "แคนดง", "ลำทะเมนชัย",
+    "เมืองยาง", "ชุมพวง"
 ]
 
-allowed_return_trip_colors = ["#00ffff", "#ffff00"]
 latest_sheet_data = {}
 
-# Regex สำหรับตรวจเวลาครอบคลุมหลายรูปแบบ
 TIME_PATTERN = re.compile(
     r'\b(?:'
     r'([01]?\d|2[0-3])[:.]([0-5]\d)'
@@ -40,143 +38,156 @@ TIME_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# ================== COLOR CHECK ==================
+def is_allowed_color(color_hex):
+    """
+    ตรวจว่าสีเป็นกลุ่ม ฟ้า / เหลือง หรือไม่
+    รองรับสีธีมจาก Google Sheet
+    """
+    if not color_hex:
+        return False
+
+    color_hex = color_hex.lower()[:7]
+
+    # ฟ้า / ฟ้าอ่อน / cyan
+    if color_hex.startswith(("#00", "#66", "#7f", "#9e")):
+        return True
+
+    # เหลือง
+    if color_hex.startswith("#ff"):
+        return True
+
+    return False
+
+# ================== UPDATE FROM SHEET ==================
 @app.route("/update", methods=["POST"])
 def update_sheet():
     global latest_sheet_data
     data = request.json
+
     if not data:
-        return "No JSON data received", 400
+        return "No JSON", 400
 
     full_data = data.get("full_sheet_data")
     if full_data:
         latest_sheet_data = full_data
-    else:
-        row = data.get("row")
-        row_cells = data.get("row_cells", [])
-        if row is not None:
-            latest_sheet_data[str(row)] = row_cells
-        else:
-            return "Data format error", 400
+        print("✅ Sheet updated:", len(full_data), "rows")
+        return "OK", 200
 
-    return "OK", 200
+    return "Invalid payload", 400
 
+# ================== CORE LOGIC ==================
 def has_round_for_district(district_name):
-    district_name_lower = district_name.lower().strip()
+    district_name = district_name.lower().strip()
 
-    DISTRICT_COLUMN_INDEX = 10  # K
-    PARTNER_COLUMN_INDEX = 14   # O
-    NOTE_COLUMN_INDEX = 15      # P
+    DISTRICT_COL = 10  # K
+    PARTNER_COL = 14   # O
+    NOTE_COL = 15      # P
 
-    for row_number, cells in latest_sheet_data.items():
+    for row, cells in latest_sheet_data.items():
 
-        # บังคับให้ row_number เป็น str เสมอ
-        row_number = str(row_number)
-
-        if row_number == "1":
+        if str(row) == "1":
             continue
 
-        # ตรวจว่ามีข้อมูลครบไหม
         if not isinstance(cells, list):
             continue
-        
-        if len(cells) <= max(DISTRICT_COLUMN_INDEX, PARTNER_COLUMN_INDEX, NOTE_COLUMN_INDEX):
+
+        if len(cells) <= max(DISTRICT_COL, PARTNER_COL, NOTE_COL):
             continue
 
-        # กัน null
-        district_cell = cells[DISTRICT_COLUMN_INDEX] or {}
-        partner_cell = cells[PARTNER_COLUMN_INDEX] or {}
-        note_cell = cells[NOTE_COLUMN_INDEX] or {}
+        district_cell = cells[DISTRICT_COL] or {}
+        partner_cell = cells[PARTNER_COL] or {}
+        note_cell = cells[NOTE_COL] or {}
 
-        district_value = str(district_cell.get("value", "")).lower().strip()
+        district_value = str(district_cell.get("value", "")).lower()
 
-        if district_name_lower in district_value:
-
+        if district_name in district_value:
             partner_text = str(partner_cell.get("value", "")).strip()
+            note_text = str(note_cell.get("value", "")).strip()
+            color_hex = (partner_cell.get("color", "") or "").lower()[:7]
 
-            # ตัดสีให้เหลือแค่ #xxxxxx
-            color_hex_rgb = (partner_cell.get("color", "") or "").lower()[:7]
+            print("DEBUG COLOR:", district_name, color_hex)
 
-            note_value = str(note_cell.get("value", "")).strip()
-
-            if color_hex_rgb in allowed_return_trip_colors:
+            if is_allowed_color(color_hex):
                 return {
-                    "status": color_hex_rgb,
-                    "note": note_value,
-                    "partner": partner_text
+                    "partner": partner_text,
+                    "note": note_text
                 }
 
     return None
 
+# ================== LINE CALLBACK ==================
 @app.route("/callback", methods=["POST"])
 def callback():
-    signature = request.headers.get("X-Line-Signature", "")
+    signature = request.headers.get("X-Line-Signature")
     body = request.get_data(as_text=True)
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
     except Exception as e:
-        print(f"❌ ERROR in callback: {e}")
+        print("❌ CALLBACK ERROR:", e)
         traceback.print_exc()
         abort(500)
+
     return "OK"
 
+# ================== LINE MESSAGE ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     try:
-        if event.source.type not in ["user", "group", "room"]:
-            return
-
         text = event.message.text.strip()
         text_lower = text.lower()
-        found_districts = [d for d in BURIRAM_DISTRICTS if d.lower() in text_lower]
 
-        time_match = TIME_PATTERN.search(text)
-        if time_match:
+        # เวลา
+        if TIME_PATTERN.search(text):
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=f"ล้อหมุนเวลา {text.strip()} นะคะ ขอบคุณค่ะ")
+                TextSendMessage(text=f"ล้อหมุนเวลา {text} นะคะ ขอบคุณค่ะ")
             )
             return
 
-        if not found_districts:
-            reply = "❌ กรุณาระบุชื่อโรงพยาบาลในบุรีรัมย์ เช่น 'นางรองมีรับกลับไหม'"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        districts = [d for d in BURIRAM_DISTRICTS if d.lower() in text_lower]
+
+        if not districts:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="❌ กรุณาระบุชื่อโรงพยาบาลในบุรีรัมย์")
+            )
             return
 
         results = []
         follow_up = False
-        for d in found_districts:
-            check_result = has_round_for_district(d)
-            if check_result:
+
+        for d in districts:
+            result = has_round_for_district(d)
+            if result:
                 follow_up = True
-                partner_text = check_result["partner"].strip()
-                note_text = check_result["note"].strip()
-                msg_parts = [f"มีรับกลับของ {d}"]
-
-                if partner_text:
-                    msg_parts.append(f"({partner_text})")
-                if note_text:
-                    msg_parts.append(f"({note_text})")
-
-                results.append(" ".join(msg_parts))
+                msg = f"มีรับกลับของ {d}"
+                if result["partner"]:
+                    msg += f" ({result['partner']})"
+                if result["note"]:
+                    msg += f" ({result['note']})"
+                results.append(msg)
             else:
                 results.append(f"ไม่มีรับกลับของ {d}")
 
-        reply_messages = [TextSendMessage(text="\n".join(results))]
+        messages = [TextSendMessage(text="\n".join(results))]
         if follow_up:
-            reply_messages.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ"))
+            messages.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ"))
 
-        line_bot_api.reply_message(event.reply_token, reply_messages)
+        line_bot_api.reply_message(event.reply_token, messages)
 
     except Exception as e:
-        print("❌ ERROR in handle_message:", e)
+        print("❌ MESSAGE ERROR:", e)
         traceback.print_exc()
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="เกิดข้อผิดพลาดในการประมวลผลค่ะ 🙏")
+            TextSendMessage(text="เกิดข้อผิดพลาดค่ะ 🙏")
         )
 
+# ================== RUN ==================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port) 
+    app.run(host="0.0.0.0", port=port)
