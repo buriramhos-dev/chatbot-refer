@@ -50,11 +50,11 @@ def update_sheet():
     latest_sheet_data.update(data["full_sheet_data"])
     return "OK", 200
 
-# ================== CORE LOGIC (FIXED) ==================
+# ================== CORE LOGIC ==================
 def has_round_for_district(district_name: str):
     district_lower = district_name.lower().strip()
 
-    # 🔥 ไล่จากแถวบนลงล่าง
+    # 🔥 ไล่จากแถวบน → ล่าง
     for row_number in sorted(latest_sheet_data.keys(), key=int):
         cells = latest_sheet_data[row_number]
 
@@ -68,19 +68,19 @@ def has_round_for_district(district_name: str):
         if district_lower not in hospital_value:
             continue
 
-        # ✅ สนใจเฉพาะแถวที่เป็นสีฟ้า/เหลือง
+        # ✅ เอาเฉพาะแถวที่เป็นสีเหลือง/ฟ้า
         if cells.get("_has_return_trip") is True:
-            partner_text = str(
+            partner = str(
                 cells.get("พันธมิตร", {}).get("value", "")
             ).strip()
 
-            note_text = str(
+            note = str(
                 cells.get("หมายเหตุ", {}).get("value", "")
             ).strip()
 
             return {
-                "partner": partner_text,
-                "note": note_text
+                "partner": partner,
+                "note": note
             }
 
     return None
@@ -105,12 +105,14 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     try:
-        text = event.message.text.strip().lower()
+        text_raw = event.message.text.strip()
+        text = text_raw.lower()
 
+        # ตรวจเวลา
         if TIME_PATTERN.search(text):
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=f"ล้อหมุนเวลา {event.message.text} นะคะ")
+                TextSendMessage(text=f"ล้อหมุนเวลา {text_raw} นะคะ")
             )
             return
 
@@ -132,16 +134,21 @@ def handle_message(event):
             if result:
                 follow_up = True
                 msg = f"มีรับกลับของ {d}"
+
+                extra = []
                 if result["partner"]:
-                    msg += f"\n ({result['partner']})"
+                    extra.append(result["partner"])
                 if result["note"]:
-                    msg += f"\n ({result['note']})"
+                    extra.append(result["note"])
+
+                if extra:
+                    msg += f" ({', '.join(extra)})"
             else:
                 msg = f"ไม่มีรับกลับของ {d}"
 
             replies.append(msg)
 
-        messages = [TextSendMessage(text="\n\n".join(replies))]
+        messages = [TextSendMessage(text="\n".join(replies))]
 
         if follow_up:
             messages.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ"))
