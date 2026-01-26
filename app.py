@@ -27,7 +27,7 @@ BURIRAM_DISTRICTS = [
     "เมืองยาง", "ชุมพวง"
 ]
 
-# 🔹 เก็บข้อมูล Sheet ล่าสุด
+# 🔹 เก็บข้อมูล Sheet ล่าสุด (เรียงตามแถว)
 latest_sheet_data = {}
 
 # ================== REGEX เวลา ==================
@@ -50,7 +50,10 @@ def update_sheet():
 
     # 🔥 ล้างข้อมูลเก่าทุกครั้ง
     latest_sheet_data.clear()
-    latest_sheet_data.update(data["full_sheet_data"])
+
+    # 🔥 เรียงตามเลขแถว (สำคัญมาก)
+    for row in sorted(data["full_sheet_data"], key=lambda x: int(x)):
+        latest_sheet_data[row] = data["full_sheet_data"][row]
 
     return "OK", 200
 
@@ -58,45 +61,35 @@ def update_sheet():
 def has_round_for_district(district_name: str):
     district_lower = district_name.lower().strip()
 
-    partners = set()
-    notes = set()
-    has_any_return = False
-
+    # ✅ ไล่จากแถวบน → ล่าง
     for cells in latest_sheet_data.values():
 
         if not isinstance(cells, dict):
             continue
 
-        hospital_value = str(
+        hospital = str(
             cells.get("HOSPITAL", {}).get("value", "")
         ).lower().strip()
 
-        if district_lower not in hospital_value:
+        if district_lower not in hospital:
             continue
 
-        partner_text = str(
+        # ❌ ถ้าไม่ใช่สีรับกลับ → ข้าม
+        if cells.get("_has_return_trip") is not True:
+            continue
+
+        partner = str(
             cells.get("พันธมิตร", {}).get("value", "")
         ).strip()
 
-        note_text = str(
+        note = str(
             cells.get("หมายเหตุ", {}).get("value", "")
         ).strip()
 
-        has_return_trip = cells.get("_has_return_trip") is True
-
-        if has_return_trip:
-            has_any_return = True
-
-        if partner_text:
-            partners.add(partner_text)
-
-        if note_text:
-            notes.add(note_text)
-
-    if has_any_return:
+        # ✅ เจอแถวแรกที่เป็นรับกลับ → ใช้เลย
         return {
-            "partner": ", ".join(partners),
-            "note": ", ".join(notes)
+            "partner": partner,
+            "note": note
         }
 
     return None
@@ -156,16 +149,16 @@ def handle_message(event):
                 msg = f"มีรับกลับของ {d}"
 
                 if result["partner"]:
-                    msg += f" ({result['partner']})"
+                    msg += f"\n🟨 {result['partner']}"
 
                 if result["note"]:
-                    msg += f" ({result['note']})"
+                    msg += f"\n📌 {result['note']}"
 
                 results.append(msg)
             else:
                 results.append(f"ไม่มีรับกลับของ {d}")
 
-        reply_msgs = [TextSendMessage(text="\n".join(results))]
+        reply_msgs = [TextSendMessage(text="\n\n".join(results))]
 
         if follow_up:
             reply_msgs.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ"))
