@@ -33,7 +33,7 @@ latest_sheet_data = {}
 TIME_PATTERN = re.compile(
     r'\b(?:'
     r'([01]?\d|2[0-3])[:.]([0-5]\d)'
-    r'|([0-2]?\d)\s*(?:โมง|น\.)\s*(เช้า|บ่าย|เย็น)?'
+    r'|([0-2]?\d)\s*(?:โมง|น\.)'
     r')\b',
     re.IGNORECASE
 )
@@ -48,7 +48,7 @@ def hex_to_rgb(hex_color):
 
 def is_allowed_color(color_hex):
     """
-    ตรวจว่าสีเป็น ฟ้า หรือ เหลือง (รองรับสีอ่อนจาก Google Sheet)
+    รับกลับ = สีฟ้า หรือ สีเหลือง เท่านั้น
     """
     if not color_hex:
         return False
@@ -59,13 +59,11 @@ def is_allowed_color(color_hex):
 
     r, g, b = rgb
 
-    # 👉 ฟ้า (Blue / Light Blue)
-    is_blue = b > 150 and g > 150 and r < 200
+    # 🔵 ฟ้า / cyan
+    is_blue = b > 150 and g > 150 and r < 180
 
-    # 👉 เหลือง (Yellow / Light Yellow)
+    # 🟡 เหลือง
     is_yellow = r > 200 and g > 200 and b < 180
-
-    print("DEBUG COLOR CHECK:", color_hex, "RGB:", rgb, "BLUE:", is_blue, "YELLOW:", is_yellow)
 
     return is_blue or is_yellow
 
@@ -102,27 +100,39 @@ def has_round_for_district(district_name):
         if not isinstance(cells, list):
             continue
 
-        if len(cells) <= max(DISTRICT_COL, PARTNER_COL, NOTE_COL):
+        if len(cells) <= DISTRICT_COL:
             continue
 
         district_cell = cells[DISTRICT_COL] or {}
-        partner_cell = cells[PARTNER_COL] or {}
-        note_cell = cells[NOTE_COL] or {}
-
         district_value = str(district_cell.get("value", "")).lower()
 
-        if district_name in district_value:
-            partner_text = str(partner_cell.get("value", "")).strip()
-            note_text = str(note_cell.get("value", "")).strip()
-            color_hex = (partner_cell.get("color", "") or "").lower()[:7]
+        if district_name not in district_value:
+            continue
 
-            print("DEBUG ROW:", row, "DISTRICT:", district_name, "COLOR:", color_hex)
-
+        # ✅ ตรวจสี "ทั้งแถว"
+        has_allowed_color = False
+        for cell in cells:
+            color_hex = (cell.get("color") or "").lower()[:7]
             if is_allowed_color(color_hex):
-                return {
-                    "partner": partner_text,
-                    "note": note_text
-                }
+                has_allowed_color = True
+                break
+
+        if not has_allowed_color:
+            continue
+
+        partner_text = ""
+        note_text = ""
+
+        if len(cells) > PARTNER_COL:
+            partner_text = str((cells[PARTNER_COL] or {}).get("value", "")).strip()
+
+        if len(cells) > NOTE_COL:
+            note_text = str((cells[NOTE_COL] or {}).get("value", "")).strip()
+
+        return {
+            "partner": partner_text,
+            "note": note_text
+        }
 
     return None
 
@@ -150,7 +160,6 @@ def handle_message(event):
         text = event.message.text.strip()
         text_lower = text.lower()
 
-        # เวลา
         if TIME_PATTERN.search(text):
             line_bot_api.reply_message(
                 event.reply_token,
