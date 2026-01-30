@@ -5,7 +5,6 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import traceback
 import os
 from dotenv import load_dotenv
-import re
 
 load_dotenv()
 app = Flask(__name__)
@@ -60,30 +59,55 @@ def update_sheet():
     return "OK", 200
 
 # ================== CORE CHECK ==================
-def has_round_for_district(district):
-    DISTRICT_COL = 11  # K
-    PARTNER_COL = 17   # Q
-    NOTE_COL = 18      # R
+def has_round_for_district(district_name):
+    district_name = district_name.lower().strip()
 
-    for row in latest_sheet_data.values():
-        if not isinstance(row, list) or len(row) <= DISTRICT_COL:
+    DISTRICT_COL = 10   # K โรงพยาบาล
+    PARTNER_COL  = 16   # Q พันธมิตร
+    NOTE_COL     = 17   # R หมายเหตุ
+
+    if not isinstance(latest_sheet_data, dict):
+        return None
+
+    for row_idx, cells in latest_sheet_data.items():
+
+        if str(row_idx) == "1":
             continue
 
-        district_text = str(row[DISTRICT_COL].get("value", "")).lower()
-        if district.lower() not in district_text:
+        if not isinstance(cells, list):
             continue
 
-        # ✅ ต้องมีสีฟ้าหรือเหลืองอย่างน้อย 1 ช่องในแถว
+        if len(cells) <= NOTE_COL:
+            continue
+
+        # โรงพยาบาล
+        district_cell = cells[DISTRICT_COL] or {}
+        district_value = str(district_cell.get("value", "")).lower()
+
+        if district_name not in district_value:
+            continue
+
+        # เช็คสีเฉพาะ K Q R
+        color_cells = [
+            cells[DISTRICT_COL],
+            cells[PARTNER_COL],
+            cells[NOTE_COL]
+        ]
+
         if not any(
-            is_allowed_color(c.get("color", ""))
-            for c in row if isinstance(c, dict)
+            is_allowed_color((c.get("color") or "").lower()[:7])
+            for c in color_cells if isinstance(c, dict)
         ):
             continue
 
-        partner = row[PARTNER_COL].get("value", "") if len(row) > PARTNER_COL else ""
-        note = row[NOTE_COL].get("value", "") if len(row) > NOTE_COL else ""
+        partner_text = str((cells[PARTNER_COL] or {}).get("value", "")).strip()
+        note_text = str((cells[NOTE_COL] or {}).get("value", "")).strip()
 
-        return {"partner": partner, "note": note}
+        return {
+            "hospital": district_value,
+            "partner": partner_text,
+            "note": note_text
+        }
 
     return None
 
@@ -114,7 +138,7 @@ def handle_message(event):
     if not districts:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="❌ กรุณาระบุอำเภอในบุรีรัมย์")
+            TextSendMessage(text="❌ กรุณาระบุโรงพยาบาลในบุรีรัมย์")
         )
         return
 
@@ -125,13 +149,13 @@ def handle_message(event):
         result = has_round_for_district(d)
         if result:
             follow = True
-            msg = f"มีรับกลับของ {d}"
+            msg = f"มีรอบรับกลับ {d}"
             if result["partner"]:
                 msg += f" ({result['partner']})"
             if result["note"]:
                 msg += f" ({result['note']})"
         else:
-            msg = f"ไม่มีรับกลับของ {d}"
+            msg = f"ไม่มีรอบรับกลับ {d}"
         replies.append(msg)
 
     messages = [TextSendMessage(text="\n".join(replies))]
