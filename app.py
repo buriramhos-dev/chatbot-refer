@@ -35,7 +35,11 @@ def hex_to_rgb(hex_color):
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
 def is_allowed_color(color_hex):
-    rgb = hex_to_rgb(color_hex[:7]) if color_hex else None
+    if not color_hex:
+        return False
+    # รับเฉพาะ 7 ตัวแรก (เช่น #RRGGBB)
+    color_hex = color_hex[:7] if len(color_hex) >= 7 else color_hex
+    rgb = hex_to_rgb(color_hex)
     if not rgb:
         return False
 
@@ -81,7 +85,7 @@ def has_round_for_district(district_name):
             continue
 
         # โรงพยาบาล
-        district_cell = cells[DISTRICT_COL] or {}
+        district_cell = cells[DISTRICT_COL] if isinstance(cells[DISTRICT_COL], dict) else {}
         district_value = str(district_cell.get("value", "")).lower()
 
         if district_name not in district_value:
@@ -95,13 +99,15 @@ def has_round_for_district(district_name):
         ]
 
         if not any(
-            is_allowed_color((c.get("color") or "").lower()[:7])
+            is_allowed_color((c.get("color") or "").lower())
             for c in color_cells if isinstance(c, dict)
         ):
             continue
 
-        partner_text = str((cells[PARTNER_COL] or {}).get("value", "")).strip()
-        note_text = str((cells[NOTE_COL] or {}).get("value", "")).strip()
+        partner_cell = cells[PARTNER_COL] if isinstance(cells[PARTNER_COL], dict) else {}
+        note_cell = cells[NOTE_COL] if isinstance(cells[NOTE_COL], dict) else {}
+        partner_text = str(partner_cell.get("value", "")).strip()
+        note_text = str(note_cell.get("value", "")).strip()
 
         return {
             "hospital": district_value,
