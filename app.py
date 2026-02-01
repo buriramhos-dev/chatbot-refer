@@ -5,6 +5,8 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import traceback
 import os
 from dotenv import load_dotenv
+import requests
+import threading
 
 load_dotenv()
 app = Flask(__name__)
@@ -352,5 +354,38 @@ def handle_message(event):
     line_bot_api.reply_message(event.reply_token, messages)
 
 # ================== RUN ==================
+def fetch_sheet_data():
+    """ดึงข้อมูล Google Sheets อัตโนมัติ"""
+    global latest_sheet_data, sheet_ready
+    
+    google_apps_script_url = os.getenv("GOOGLE_APPS_SCRIPT_URL")
+    if not google_apps_script_url:
+        print("❌ GOOGLE_APPS_SCRIPT_URL not found in environment variables")
+        return
+    
+    try:
+        print("🔄 Fetching sheet data on startup...")
+        response = requests.get(google_apps_script_url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data and "full_sheet_data" in data:
+            latest_sheet_data = data["full_sheet_data"]
+            sheet_ready = True
+            print("✅ Sheet data loaded successfully on startup")
+            print(f"📊 Total rows: {len(latest_sheet_data)}")
+        else:
+            print("⚠️ Invalid response format from Google Apps Script")
+    except requests.exceptions.Timeout:
+        print("⏱️ Request timeout - sheet data will be loaded on first user message")
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Error fetching sheet data: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+
 if __name__ == "__main__":
+    # ดึงข้อมูลในเธรดแยกเพื่อไม่บล็อก startup
+    fetch_thread = threading.Thread(target=fetch_sheet_data, daemon=True)
+    fetch_thread.start()
+    
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
