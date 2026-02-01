@@ -112,8 +112,13 @@ def is_allowed_color(color_data):
     is_blue = b >= 200 and g >= 200 and r <= 50
     
     # สีเหลือง (Yellow): #ffff00 = (255, 255, 0)
-    # เงื่อนไข: R และ G สูงมาก (>=200), B ต่ำมาก (<=50)
-    is_yellow = r >= 200 and g >= 200 and b <= 50
+    # เงื่อนไข: R และ G สูงมาก (>=150 เพื่อให้ยืดหยุ่น), B ต่ำมาก (<=100 เพื่อให้ยืดหยุ่น)
+    # ปรับเงื่อนไขให้ยืดหยุ่นมากขึ้นเพื่อรองรับสีเหลืองที่อาจมีค่าแตกต่างกัน
+    # และต้องให้ R+G มากกว่า B อย่างชัดเจน (เพื่อแยกจากสีอื่น)
+    is_yellow = (r >= 150 and g >= 150 and b <= 100) and ((r + g) > (b * 2))
+    
+    # Debug: แสดง RGB และผลการตรวจสอบ
+    print(f"   🎨 Color check: RGB({r}, {g}, {b}) | Blue: {is_blue} | Yellow: {is_yellow}")
     
     return is_blue or is_yellow
 
@@ -255,8 +260,11 @@ def has_round_for_district(district_name):
             else:
                 # Debug: แสดงข้อมูลสีที่พบ
                 rgb = normalize_color_to_rgb(color_data)
-                is_valid = is_allowed_color(color_data) if color_data else False
-                print(f"   🎨 {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | key={found_key} | color={color_data} | rgb={rgb} | valid={is_valid}")
+                if rgb:
+                    is_valid = is_allowed_color(color_data) if color_data else False
+                    print(f"   🎨 {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | key={found_key} | color={color_data} | rgb={rgb} | valid={is_valid}")
+                else:
+                    print(f"   ⚠️ {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | key={found_key} | color={color_data} | rgb=None (cannot normalize)")
             
             # ตรวจสอบสี
             if color_data and is_allowed_color(color_data):
