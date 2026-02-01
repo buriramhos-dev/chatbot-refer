@@ -210,10 +210,11 @@ def callback():
 # ================== MESSAGE ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    if not sheet_ready:
+    # เช็คว่ามีข้อมูลหรือไม่ (ไม่ต้องรอ sheet_ready)
+    if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ")
+            TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
         )
         return
 
@@ -234,13 +235,13 @@ def handle_message(event):
         result = has_round_for_district(d)
         if result:
             follow = True
-            # รูปแบบ: hospital(พันธมิตร ถ้ามี)(หมายเหตุ)
+            # รูปแบบ: มีรับกลับของ hospital(พันธมิตร ถ้ามี)(หมายเหตุ)
             hospital_text = result["hospital"].strip() if result["hospital"] else ""
             partner_text = result["partner"].strip() if result["partner"] else ""
             note_text = result["note"].strip() if result["note"] else ""
             
-            # เริ่มจาก hospital
-            msg = hospital_text if hospital_text else f"มีรอบรับกลับ {d}"
+            # เริ่มจาก "มีรับกลับของ"
+            msg = f"มีรับกลับของ {hospital_text if hospital_text else d}"
             
             # เพิ่มพันธมิตรถ้ามี
             if partner_text:
