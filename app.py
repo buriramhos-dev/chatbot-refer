@@ -176,11 +176,32 @@ def has_round_for_district(district_name):
     district_name = district_name.lower().strip()
 
     DISTRICT_COL = 10   # K โรงพยาบาล
-    PARTNER_COL  = 14   # O พันธมิตร
-    NOTE_COL     = 15   # P หมายเหตุ
-
+    
     if not isinstance(latest_sheet_data, dict):
         return None
+
+    # หา PARTNER_COL และ NOTE_COL จาก header (row 1)
+    PARTNER_COL = None
+    NOTE_COL = None
+    
+    if "1" in latest_sheet_data:
+        header_row = latest_sheet_data["1"]
+        if isinstance(header_row, list):
+            for idx, cell in enumerate(header_row):
+                if isinstance(cell, dict):
+                    cell_value = str(cell.get("value", "")).lower().strip()
+                    if "พันธมิตร" in cell_value:
+                        PARTNER_COL = idx
+                    if "หมายเหตุ" in cell_value:
+                        NOTE_COL = idx
+    
+    # ถ้าหาไม่เจอ ใช้ default
+    if PARTNER_COL is None:
+        PARTNER_COL = 14
+    if NOTE_COL is None:
+        NOTE_COL = 15
+    
+    print(f"📊 Column indices: PARTNER_COL={PARTNER_COL}, NOTE_COL={NOTE_COL}")
 
     # เรียง row_idx เป็นตัวเลขเพื่อให้ผลลัพธ์สม่ำเสมอ (ใช้ stable sort)
     def get_row_key(item):
@@ -203,9 +224,10 @@ def has_round_for_district(district_name):
         if len(cells) <= NOTE_COL:
             continue
 
-        # โรงพยาบาล
+        # โรงพยาบาล - เก็บชื่อจริงและตัวเปรียบเทียบแยกกัน
         district_cell = cells[DISTRICT_COL] if isinstance(cells[DISTRICT_COL], dict) else {}
-        district_value = str(district_cell.get("value", "")).lower().strip()
+        district_value_original = str(district_cell.get("value", "")).strip()  # ชื่อจริง
+        district_value = district_value_original.lower().strip()  # สำหรับเปรียบเทียบ
 
         # เปรียบเทียบชื่ออำเภอให้ตรงกันมากขึ้น
         if district_name not in district_value and district_value not in district_name:
@@ -276,7 +298,7 @@ def has_round_for_district(district_name):
         
         # ถ้าแถวนี้มีสีที่ถูกต้อง ให้ return ทันที
         if has_valid_color:
-            # ดึง partner และ note จาก column O (14) และ P (15) เสมอ
+            # ดึง partner และ note จากตำแหน่งที่ถูกต้อง
             partner_cell = cells[PARTNER_COL] if len(cells) > PARTNER_COL and isinstance(cells[PARTNER_COL], dict) else {}
             note_cell = cells[NOTE_COL] if len(cells) > NOTE_COL and isinstance(cells[NOTE_COL], dict) else {}
             
@@ -288,9 +310,9 @@ def has_round_for_district(district_name):
             partner_text = partner_text if partner_text and partner_text.replace(" ", "") else ""
             note_text = note_text if note_text and note_text.replace(" ", "") else ""
 
-            print(f"   ✅✅✅ {district_name} | RETURNING RESULT from row {row_idx_display} | partner='{partner_text}' | note='{note_text}'")
+            print(f"   ✅✅✅ {district_name} | RETURNING RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
             return {
-                "hospital": district_value,
+                "hospital": district_value_original,  # ใช้ชื่อจริง ไม่ใช่ lowercase
                 "partner": partner_text,
                 "note": note_text
             }
