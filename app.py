@@ -213,8 +213,8 @@ def has_round_for_district(district_name):
     
     sorted_rows = sorted(latest_sheet_data.items(), key=get_row_key)
     
-    # เก็บผลลัพธ์ที่มีสีถูกต้องทั้งหมด แล้วใช้แถวสุดท้าย (ล่าสุด)
-    last_valid_result = None
+    # เก็บผลลัพธ์ที่มีสีถูกต้องแถวแรก (ใช้แถวบนสุดเมื่อมีหลายแถว)
+    first_valid_result = None
     
     # ตรวจสอบแต่ละแถว - ถ้าเจอสีที่ถูกต้องให้เก็บไว้
     for row_idx, cells in sorted_rows:
@@ -299,7 +299,7 @@ def has_round_for_district(district_name):
                 print(f"   ✅✅ {district_name} | FOUND VALID COLOR in row {row_idx_display}, col {col_name}({col_idx}): {color_data}")
                 break
         
-        # ถ้าแถวนี้มีสีที่ถูกต้อง ให้เก็บไว้ (ใช้แถวล่าสุดเมื่อมีหลายแถว)
+        # ถ้าแถวนี้มีสีที่ถูกต้อง ให้เก็บไว้ (ใช้แถวบนสุดเมื่อมีหลายแถว)
         if has_valid_color:
             # ดึง partner และ note จากตำแหน่งที่ถูกต้อง
             partner_cell = cells[PARTNER_COL] if len(cells) > PARTNER_COL and isinstance(cells[PARTNER_COL], dict) else {}
@@ -313,18 +313,19 @@ def has_round_for_district(district_name):
             partner_text = partner_text if partner_text and partner_text.replace(" ", "") else ""
             note_text = note_text if note_text and note_text.replace(" ", "") else ""
 
-            # เก็บผลลัพธ์ (จะทำให้ใช้แถวสุดท้ายเมื่อมีหลายแถว)
-            last_valid_result = {
-                "hospital": district_value_original,  # ใช้ชื่อจริง ไม่ใช่ lowercase
-                "partner": partner_text,
-                "note": note_text
-            }
-            print(f"   ✅✅✅ {district_name} | FOUND RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
+            # เก็บผลลัพธ์แถวแรกเท่านั้น
+            if first_valid_result is None:
+                first_valid_result = {
+                    "hospital": district_value_original,  # ใช้ชื่อจริง ไม่ใช่ lowercase
+                    "partner": partner_text,
+                    "note": note_text
+                }
+                print(f"   ✅✅✅ {district_name} | FOUND FIRST RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
     
-    # return ผลลัพธ์สุดท้ายเท่านั้น
-    if last_valid_result:
-        print(f"   ✅✅✅ {district_name} | RETURNING FINAL RESULT: {last_valid_result}")
-        return last_valid_result
+    # return ผลลัพธ์แถวบนสุด
+    if first_valid_result:
+        print(f"   ✅✅✅ {district_name} | RETURNING FINAL RESULT: {first_valid_result}")
+        return first_valid_result
 
     return None
 
