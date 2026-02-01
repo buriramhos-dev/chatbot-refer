@@ -69,13 +69,40 @@ def normalize_color_to_rgb(color_data):
         # ลองแปลงโดยตรง
         return hex_to_rgb(color_str)
     
-    # ถ้าเป็น dict ที่มี red, green, blue (0.0-1.0)
+    # ถ้าเป็น dict ที่มี red, green, blue (0.0-1.0 หรือ 0-255)
     if isinstance(color_data, dict):
+        # ลองหา color key ที่มี nested dict (colorFormat API)
+        if "color" in color_data and isinstance(color_data["color"], dict):
+            return normalize_color_to_rgb(color_data["color"])
+        
+        # ลองหา rgbColor
+        if "rgbColor" in color_data:
+            try:
+                rgb = color_data["rgbColor"]
+                if isinstance(rgb, dict):
+                    r = int(float(rgb.get("red", 0)) * 255) if float(rgb.get("red", 0)) <= 1 else int(float(rgb.get("red", 0)))
+                    g = int(float(rgb.get("green", 0)) * 255) if float(rgb.get("green", 0)) <= 1 else int(float(rgb.get("green", 0)))
+                    b = int(float(rgb.get("blue", 0)) * 255) if float(rgb.get("blue", 0)) <= 1 else int(float(rgb.get("blue", 0)))
+                    return (r, g, b)
+            except (ValueError, TypeError, AttributeError):
+                pass
+        
+        # ลองหา red, green, blue (0.0-1.0)
         if "red" in color_data and "green" in color_data and "blue" in color_data:
             try:
-                r = int(float(color_data["red"]) * 255)
-                g = int(float(color_data["green"]) * 255)
-                b = int(float(color_data["blue"]) * 255)
+                red_val = float(color_data["red"])
+                green_val = float(color_data["green"])
+                blue_val = float(color_data["blue"])
+                
+                # ถ้าค่าอยู่ระหว่าง 0-1 ให้คูณ 255
+                if red_val <= 1 and green_val <= 1 and blue_val <= 1:
+                    r = int(red_val * 255)
+                    g = int(green_val * 255)
+                    b = int(blue_val * 255)
+                else:
+                    r = int(red_val)
+                    g = int(green_val)
+                    b = int(blue_val)
                 return (r, g, b)
             except (ValueError, TypeError):
                 pass
@@ -83,10 +110,6 @@ def normalize_color_to_rgb(color_data):
         # ถ้ามี hex ใน dict
         if "hex" in color_data:
             return hex_to_rgb(color_data["hex"])
-        
-        # ถ้ามี color key ใน dict (nested)
-        if "color" in color_data:
-            return normalize_color_to_rgb(color_data["color"])
     
     return None
 
@@ -108,19 +131,21 @@ def is_allowed_color(color_data):
 
     r, g, b = rgb
     
+    # Debug: แสดง RGB เพื่อตรวจสอบ
+    print(f"   🎨 Checking RGB({r}, {g}, {b}) | type: {type(r)}, {type(g)}, {type(b)}")
+    
     # สีฟ้า (Cyan): #00ffff = (0, 255, 255)
-    # เงื่อนไข: B และ G สูงมาก (>=200), R ต่ำมาก (<=50)
-    # ใช้ >= และ <= เพื่อให้ครอบคลุมสีที่ใกล้เคียง
-    is_blue = b >= 200 and g >= 200 and r <= 50
+    # เงื่อนไข: B และ G สูงมาก (>=180), R ต่ำมาก (<=75)
+    # ยืดหยุ่นมากขึ้นเพื่อรองรับการเปลี่ยนแปลงเล็กน้อยจาก Google Sheets
+    is_blue = b >= 180 and g >= 180 and r <= 75
     
     # สีเหลือง (Yellow): #ffff00 = (255, 255, 0)
-    # เงื่อนไข: R และ G สูงมาก (>=150 เพื่อให้ยืดหยุ่น), B ต่ำมาก (<=100 เพื่อให้ยืดหยุ่น)
-    # ปรับเงื่อนไขให้ยืดหยุ่นมากขึ้นเพื่อรองรับสีเหลืองที่อาจมีค่าแตกต่างกัน
-    # และต้องให้ R+G มากกว่า B อย่างชัดเจน (เพื่อแยกจากสีอื่น)
-    is_yellow = (r >= 150 and g >= 150 and b <= 100) and ((r + g) > (b * 2))
+    # เงื่อนไข: R และ G สูงมาก (>=200 สำหรับแม่นยำ), B ต่ำมาก (<=50)
+    # ยืดหยุ่นเหมาะสม
+    is_yellow = (r >= 200 and g >= 200 and b <= 50)
     
     # Debug: แสดง RGB และผลการตรวจสอบ
-    print(f"   🎨 Color check: RGB({r}, {g}, {b}) | Blue: {is_blue} | Yellow: {is_yellow}")
+    print(f"   ✓ RGB({r}, {g}, {b}) | Blue: {is_blue} | Yellow: {is_yellow}")
     
     return is_blue or is_yellow
 
