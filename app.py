@@ -190,18 +190,12 @@ def has_round_for_district(district_name):
             for idx, cell in enumerate(header_row):
                 if isinstance(cell, dict):
                     cell_value = str(cell.get("value", "")).lower().strip()
-                    if "พันธมิตร" in cell_value:
+                    if "พันธมิตร" in cell_value or "partner" in cell_value:
                         PARTNER_COL = idx
-                    if "หมายเหตุ" in cell_value:
+                        print(f"📊 Found PARTNER_COL at index {idx}")
+                    if "หมายเหตุ" in cell_value or "note" in cell_value or "remark" in cell_value:
                         NOTE_COL = idx
-    
-    # ถ้าหาไม่เจอ ใช้ default
-    if PARTNER_COL is None:
-        PARTNER_COL = 14
-    if NOTE_COL is None:
-        NOTE_COL = 15
-    
-    print(f"📊 Column indices: PARTNER_COL={PARTNER_COL}, NOTE_COL={NOTE_COL}")
+                        print(f"📊 Found NOTE_COL at index {idx}")
 
     # เรียง row_idx เป็นตัวเลขเพื่อให้ผลลัพธ์สม่ำเสมอ (ใช้ stable sort)
     def get_row_key(item):
@@ -301,18 +295,28 @@ def has_round_for_district(district_name):
         
         # ถ้าแถวนี้มีสีที่ถูกต้อง ให้เก็บไว้ (ใช้แถวบนสุดเมื่อมีหลายแถว)
         if has_valid_color:
-            # ดึง partner และ note จากตำแหน่งที่ถูกต้อง
-            partner_cell = cells[PARTNER_COL] if len(cells) > PARTNER_COL and isinstance(cells[PARTNER_COL], dict) else {}
-            note_cell = cells[NOTE_COL] if len(cells) > NOTE_COL and isinstance(cells[NOTE_COL], dict) else {}
+            # ดึง partner และ note จากเฉพาะแถวนี้
+            partner_text = ""
+            note_text = ""
             
-            # ดึง value อย่างเคร่งครัด - ถ้า empty ให้ default empty string
-            partner_text = str(partner_cell.get("value", "")).strip() if partner_cell.get("value") else ""
-            note_text = str(note_cell.get("value", "")).strip() if note_cell.get("value") else ""
+            # ดึงจาก PARTNER_COL ถ้าหาเจอ
+            if PARTNER_COL is not None and len(cells) > PARTNER_COL:
+                partner_cell = cells[PARTNER_COL]
+                if isinstance(partner_cell, dict):
+                    partner_text = str(partner_cell.get("value", "")).strip()
+            
+            # ดึงจาก NOTE_COL ถ้าหาเจอ
+            if NOTE_COL is not None and len(cells) > NOTE_COL:
+                note_cell = cells[NOTE_COL]
+                if isinstance(note_cell, dict):
+                    note_text = str(note_cell.get("value", "")).strip()
             
             # Filter ข้อมูลขยะ - ถ้ามี whitespace เท่านั้นให้ถือว่า empty
             partner_text = partner_text if partner_text and partner_text.replace(" ", "") else ""
             note_text = note_text if note_text and note_text.replace(" ", "") else ""
-
+            
+            print(f"   ✅✅✅ {district_name} | FOUND FIRST RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
+            
             # เก็บผลลัพธ์แถวแรกเท่านั้น
             if first_valid_result is None:
                 first_valid_result = {
@@ -320,7 +324,6 @@ def has_round_for_district(district_name):
                     "partner": partner_text,
                     "note": note_text
                 }
-                print(f"   ✅✅✅ {district_name} | FOUND FIRST RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
     
     # return ผลลัพธ์แถวบนสุด
     if first_valid_result:
