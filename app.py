@@ -46,11 +46,15 @@ def normalize_color_to_rgb(color_data):
     
     # ถ้าเป็น string (hex)
     if isinstance(color_data, str):
-        color_str = color_data.strip()
+        color_str = color_data.strip().upper()
+        # ลบ whitespace และตรวจสอบรูปแบบ
         if color_str.startswith("#"):
             return hex_to_rgb(color_str)
         elif len(color_str) == 6:
             return hex_to_rgb("#" + color_str)
+        elif len(color_str) == 7 and color_str[0] != "#":
+            # อาจมีรูปแบบอื่น
+            return hex_to_rgb("#" + color_str[:6])
         else:
             return hex_to_rgb(color_str)
     
@@ -80,6 +84,9 @@ def is_allowed_color(color_data):
     - สีฟ้า: #00ffff (cyan) = RGB(0, 255, 255) - B และ G สูง, R ต่ำ
     - สีเหลือง: #ffff00 (yellow) = RGB(255, 255, 0) - R และ G สูง, B ต่ำ
     """
+    if not color_data:
+        return False
+    
     rgb = normalize_color_to_rgb(color_data)
     if not rgb:
         return False
@@ -87,12 +94,13 @@ def is_allowed_color(color_data):
     r, g, b = rgb
     
     # สีฟ้า (Cyan): #00ffff = (0, 255, 255)
-    # เงื่อนไข: B และ G สูงมาก (>200), R ต่ำมาก (<50)
-    is_blue = b > 200 and g > 200 and r < 50
+    # เงื่อนไข: B และ G สูงมาก (>=200), R ต่ำมาก (<=50)
+    # ใช้ >= และ <= เพื่อให้ครอบคลุมสีที่ใกล้เคียง
+    is_blue = b >= 200 and g >= 200 and r <= 50
     
     # สีเหลือง (Yellow): #ffff00 = (255, 255, 0)
-    # เงื่อนไข: R และ G สูงมาก (>200), B ต่ำมาก (<50)
-    is_yellow = r > 200 and g > 200 and b < 50
+    # เงื่อนไข: R และ G สูงมาก (>=200), B ต่ำมาก (<=50)
+    is_yellow = r >= 200 and g >= 200 and b <= 50
     
     return is_blue or is_yellow
 
@@ -127,11 +135,15 @@ def has_round_for_district(district_name):
     # รวบรวมแถวที่ตรงกับชื่ออำเภอก่อน (เรียงตาม row_idx เพื่อให้ผลลัพธ์สม่ำเสมอ)
     matching_rows = []
     
-    # เรียง row_idx เป็นตัวเลขเพื่อให้ผลลัพธ์สม่ำเสมอ
-    sorted_rows = sorted(
-        latest_sheet_data.items(),
-        key=lambda x: int(x[0]) if str(x[0]).isdigit() else 999999
-    )
+    # เรียง row_idx เป็นตัวเลขเพื่อให้ผลลัพธ์สม่ำเสมอ (ใช้ stable sort)
+    def get_row_key(item):
+        row_key = item[0]
+        try:
+            return int(row_key)
+        except (ValueError, TypeError):
+            return 999999
+    
+    sorted_rows = sorted(latest_sheet_data.items(), key=get_row_key)
     
     for row_idx, cells in sorted_rows:
         if str(row_idx) == "1":
@@ -153,31 +165,50 @@ def has_round_for_district(district_name):
 
         matching_rows.append((row_idx, cells, district_value))
 
-    # ตรวจสอบสีจากแถวที่ตรงกันทั้งหมด
+    # ตรวจสอบสีจากแถวที่ตรงกันทั้งหมด (เรียงตาม row_idx เพื่อให้ผลลัพธ์สม่ำเสมอ)
     for row_idx, cells, district_value in matching_rows:
-        # เช็คสีเฉพาะ K Q R
+        # เช็คสีเฉพาะ K O P
         color_cells = [
-            cells[DISTRICT_COL],
-            cells[PARTNER_COL],
-            cells[NOTE_COL]
+            (DISTRICT_COL, cells[DISTRICT_COL]),
+            (PARTNER_COL, cells[PARTNER_COL]),
+            (NOTE_COL, cells[NOTE_COL])
         ]
 
-        # ตรวจสอบสีจากแต่ละ cell
+        # ตรวจสอบสีจากแต่ละ cell อย่างครอบคลุม
         has_valid_color = False
-        for c in color_cells:
+        for col_idx, c in color_cells:
             if not isinstance(c, dict):
                 continue
             
-            # ลองหลายรูปแบบของ color
-            color_data = (
-                c.get("color") or 
-                c.get("backgroundColor") or 
-                c.get("bgColor") or
-                c.get("fill") or
-                None
-            )
+            # ตรวจสอบทุก key ที่เป็นไปได้สำหรับ color
+            color_data = None
             
-            if is_allowed_color(color_data):
+            # ลำดับความสำคัญ: color > backgroundColor > bgColor > fill > background
+            priority_keys = ["color", "backgroundColor", "bgColor", "fill", "background"]
+            for key in priority_keys:
+                if key in c:
+                    val = c[key]
+                    if val and (isinstance(val, str) or isinstance(val, dict)):
+                        color_data = val
+                        break
+            
+            # ถ้ายังไม่มี ลองค้นหา keys ที่มีคำว่า "color" ในชื่อ
+            if not color_data:
+                for key, value in c.items():
+                    if isinstance(key, str) and "color" in key.lower():
+                        if value and (isinstance(value, str) or isinstance(value, dict)):
+                            color_data = value
+                            break
+            
+            # ถ้ายังไม่มี ลองดู values ทั้งหมดที่อาจเป็น color
+            if not color_data:
+                for key, value in c.items():
+                    if isinstance(value, str) and (value.startswith("#") or len(value) == 6 or len(value) == 7):
+                        color_data = value
+                        break
+            
+            # ตรวจสอบสี
+            if color_data and is_allowed_color(color_data):
                 has_valid_color = True
                 break
         
