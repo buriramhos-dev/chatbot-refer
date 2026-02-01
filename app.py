@@ -118,8 +118,8 @@ def has_round_for_district(district_name):
     district_name = district_name.lower().strip()
 
     DISTRICT_COL = 10   # K โรงพยาบาล
-    PARTNER_COL  = 16   # Q พันธมิตร
-    NOTE_COL     = 17   # R หมายเหตุ
+    PARTNER_COL  = 14   # O พันธมิตร
+    NOTE_COL     = 15   # P หมายเหตุ
 
     if not isinstance(latest_sheet_data, dict):
         return None
@@ -234,25 +234,21 @@ def handle_message(event):
         result = has_round_for_district(d)
         if result:
             follow = True
-            # แสดงเฉพาะข้อมูลจาก 3 คอลัมน์: Hospital, พันธมิตร, หมายเหตุ
-            msg_parts = []
-            
-            # Hospital
+            # รูปแบบ: hospital(พันธมิตร ถ้ามี)(หมายเหตุ)
             hospital_text = result["hospital"].strip() if result["hospital"] else ""
-            if hospital_text:
-                msg_parts.append(f"โรงพยาบาล: {hospital_text}")
-            
-            # พันธมิตร
             partner_text = result["partner"].strip() if result["partner"] else ""
-            if partner_text:
-                msg_parts.append(f"พันธมิตร: {partner_text}")
-            
-            # หมายเหตุ
             note_text = result["note"].strip() if result["note"] else ""
-            if note_text:
-                msg_parts.append(f"หมายเหตุ: {note_text}")
             
-            msg = "\n".join(msg_parts) if msg_parts else f"มีรอบรับกลับ {d}"
+            # เริ่มจาก hospital
+            msg = hospital_text if hospital_text else f"มีรอบรับกลับ {d}"
+            
+            # เพิ่มพันธมิตรถ้ามี
+            if partner_text:
+                msg += f"({partner_text})"
+            
+            # เพิ่มหมายเหตุถ้ามี
+            if note_text:
+                msg += f"({note_text})"
         else:
             msg = f"ไม่มีรอบรับกลับ {d}"
         replies.append(msg)
