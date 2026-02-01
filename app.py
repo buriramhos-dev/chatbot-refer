@@ -302,14 +302,6 @@ def callback():
 # ================== MESSAGE ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    # เช็คว่ามีข้อมูลหรือไม่ (ไม่ต้องรอ sheet_ready)
-    if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
-        )
-        return
-
     text = event.message.text.lower()
     districts = [d for d in BURIRAM_DISTRICTS if d.lower() in text]
 
@@ -317,6 +309,14 @@ def handle_message(event):
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="❌ กรุณาระบุโรงพยาบาลในบุรีรัมย์")
+        )
+        return
+
+    # ถ้ายังไม่มีข้อมูล
+    if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
         )
         return
 
