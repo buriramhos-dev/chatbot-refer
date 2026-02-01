@@ -1,4 +1,7 @@
 "credentials.json" 
 credentials.json 
 credentials.json 
-credentials.json 
+credentials.json
+
+# Ignore git-filter-repo directory
+git-filter-repo/ 
