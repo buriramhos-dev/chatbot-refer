@@ -185,9 +185,6 @@ def has_round_for_district(district_name):
     if not isinstance(latest_sheet_data, dict):
         return None
 
-    # รวบรวมแถวที่ตรงกับชื่ออำเภอก่อน (เรียงตาม row_idx เพื่อให้ผลลัพธ์สม่ำเสมอ)
-    matching_rows = []
-    
     # เรียง row_idx เป็นตัวเลขเพื่อให้ผลลัพธ์สม่ำเสมอ (ใช้ stable sort)
     def get_row_key(item):
         row_key = item[0]
@@ -198,6 +195,7 @@ def has_round_for_district(district_name):
     
     sorted_rows = sorted(latest_sheet_data.items(), key=get_row_key)
     
+    # ตรวจสอบแต่ละแถว - ถ้าเจอสีที่ถูกต้องให้ return ทันที
     for row_idx, cells in sorted_rows:
         if str(row_idx) == "1":
             continue
@@ -216,10 +214,10 @@ def has_round_for_district(district_name):
         if district_name not in district_value and district_value not in district_name:
             continue
 
-        matching_rows.append((row_idx, cells, district_value))
-
-    # ตรวจสอบสีจากแถวที่ตรงกันทั้งหมด (เรียงตาม row_idx เพื่อให้ผลลัพธ์สม่ำเสมอ)
-    for row_idx, cells, district_value in matching_rows:
+        # เจอแถวที่ตรงกัน ตอนนี้เช็คสีเลย
+        row_idx_display = row_idx
+        print(f"🔍 {district_name} | Row {row_idx_display} | Found matching row, checking colors...")
+        
         # เช็คสีเฉพาะ K O P
         color_cells = [
             (DISTRICT_COL, "K", cells[DISTRICT_COL]),
@@ -227,22 +225,12 @@ def has_round_for_district(district_name):
             (NOTE_COL, "P", cells[NOTE_COL])
         ]
 
-        # ตรวจสอบสีจากแต่ละ cell อย่างครอบคลุม
         has_valid_color = False
-        
-        # Debug: แสดงข้อมูล cell ทั้งหมด
-        print(f"🔍 {district_name} | Row {row_idx} | Checking cells...")
-        print(f"   Cell K keys: {list(cells[DISTRICT_COL].keys()) if isinstance(cells[DISTRICT_COL], dict) else 'Not a dict'}")
-        print(f"   Cell O keys: {list(cells[PARTNER_COL].keys()) if isinstance(cells[PARTNER_COL], dict) else 'Not a dict'}")
-        print(f"   Cell P keys: {list(cells[NOTE_COL].keys()) if isinstance(cells[NOTE_COL], dict) else 'Not a dict'}")
         
         for col_idx, col_name, c in color_cells:
             if not isinstance(c, dict):
-                print(f"   ⚠️ {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | Not a dict: {type(c)}")
+                print(f"   ⚠️ {district_name} | Row {row_idx_display} | Col {col_name}({col_idx}) | Not a dict: {type(c)}")
                 continue
-            
-            # Debug: แสดง keys ทั้งหมดใน cell
-            print(f"   📋 {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | All keys: {list(c.keys())}")
             
             # ตรวจสอบทุก key ที่เป็นไปได้สำหรับ color
             color_data = None
@@ -281,22 +269,10 @@ def has_round_for_district(district_name):
                             print(f"   ✅ Found hex color in key '{key}': {color_data}")
                             break
             
-            # ถ้ายังไม่มี แสดงทุก values เพื่อ debug
-            if not color_data:
-                print(f"   ⚠️ {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | No color found. All values: {dict(c)}")
-            else:
-                # Debug: แสดงข้อมูลสีที่พบ
-                rgb = normalize_color_to_rgb(color_data)
-                if rgb:
-                    is_valid = is_allowed_color(color_data) if color_data else False
-                    print(f"   🎨 {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | key={found_key} | color={color_data} | rgb={rgb} | valid={is_valid}")
-                else:
-                    print(f"   ⚠️ {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | key={found_key} | color={color_data} | rgb=None (cannot normalize)")
-            
             # ตรวจสอบสี
             if color_data and is_allowed_color(color_data):
                 has_valid_color = True
-                print(f"   ✅✅ {district_name} | FOUND VALID COLOR in row {row_idx}, col {col_name}({col_idx}): {color_data}")
+                print(f"   ✅✅ {district_name} | FOUND VALID COLOR in row {row_idx_display}, col {col_name}({col_idx}): {color_data}")
                 break
         
         # ถ้าแถวนี้มีสีที่ถูกต้อง ให้ return ทันที
@@ -306,6 +282,7 @@ def has_round_for_district(district_name):
             partner_text = str(partner_cell.get("value", "")).strip()
             note_text = str(note_cell.get("value", "")).strip()
 
+            print(f"   ✅✅✅ {district_name} | RETURNING RESULT from row {row_idx_display}")
             return {
                 "hospital": district_value,
                 "partner": partner_text,
