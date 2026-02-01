@@ -132,14 +132,15 @@ def is_allowed_color(color_data):
     r, g, b = rgb
     
     # Debug: แสดง RGB เพื่อตรวจสอบ
-    print(f"   🎨 Checking RGB({r}, {g}, {b}) | type: {type(r)}, {type(g)}, {type(b)}")
+    print(f"   🎨 Checking RGB({r}, {g}, {b})")
     
-    # สีฟ้า (Cyan): ต้องมี B หรือ G สูงกว่า R อย่างชัดเจน
-    # หลวมมาก: max(b,g) > min(r,g,b) แล้ว ถือว่าเป็นสีฟ้า
-    is_blue = (max(b, g) > r + 50) or (b >= 80 or g >= 80) and (b > r or g > r)
+    # สีฟ้า (Cyan): ต้อง B >= 100 และ G >= 100 และ R <= 100
+    # ทั้ง B และ G ต้องสูงและ R ต้องต่ำ
+    is_blue = (b >= 100 and g >= 100 and r <= 100 and abs(b - g) <= 50)
     
-    # สีเหลือง (Yellow): ต้องมี R และ G สูงกว่า B อย่างชัดเจน
-    is_yellow = (max(r, g) > b + 50) or (r >= 80 or g >= 80) and (r > b or g > b)
+    # สีเหลือง (Yellow): ต้อง R >= 150 และ G >= 150 และ B <= 50
+    # ทั้ง R และ G ต้องใกล้เคียงกัน (ความต่างไม่เกิน 30) และ B ต่ำ
+    is_yellow = (r >= 150 and g >= 150 and b <= 50 and abs(r - g) <= 30)
     
     # Debug: แสดง RGB และผลการตรวจสอบ
     print(f"   ✓ RGB({r}, {g}, {b}) | Blue: {is_blue} | Yellow: {is_yellow}")
@@ -181,8 +182,9 @@ def has_round_for_district(district_name):
         return None
 
     # หา PARTNER_COL และ NOTE_COL จาก header (row 1)
-    PARTNER_COL = None
-    NOTE_COL = None
+    # ค้นหาจากชื่อ column หรือใช้ default
+    PARTNER_COL = 14  # Default column O
+    NOTE_COL = 15     # Default column P
     
     if "1" in latest_sheet_data:
         header_row = latest_sheet_data["1"]
@@ -190,12 +192,16 @@ def has_round_for_district(district_name):
             for idx, cell in enumerate(header_row):
                 if isinstance(cell, dict):
                     cell_value = str(cell.get("value", "")).lower().strip()
-                    if "พันธมิตร" in cell_value or "partner" in cell_value:
+                    # ค้นหาคอลัมน์พันธมิตร
+                    if "พันธมิตร" in cell_value:
                         PARTNER_COL = idx
-                        print(f"📊 Found PARTNER_COL at index {idx}")
-                    if "หมายเหตุ" in cell_value or "note" in cell_value or "remark" in cell_value:
+                        print(f"📊 Found PARTNER_COL='{cell_value}' at index {idx}")
+                    # ค้นหาคอลัมน์หมายเหตุ
+                    if "หมายเหตุ" in cell_value or "remark" in cell_value:
                         NOTE_COL = idx
-                        print(f"📊 Found NOTE_COL at index {idx}")
+                        print(f"📊 Found NOTE_COL='{cell_value}' at index {idx}")
+    
+    print(f"📊 Using PARTNER_COL={PARTNER_COL}, NOTE_COL={NOTE_COL}")
 
     # เรียง row_idx เป็นตัวเลขเพื่อให้ผลลัพธ์สม่ำเสมอ (ใช้ stable sort)
     def get_row_key(item):
@@ -299,21 +305,21 @@ def has_round_for_district(district_name):
             partner_text = ""
             note_text = ""
             
-            # ดึงจาก PARTNER_COL ถ้าหาเจอ
-            if PARTNER_COL is not None and len(cells) > PARTNER_COL:
+            # ดึงจาก PARTNER_COL - ตรวจสอบให้เข้มงวด
+            if PARTNER_COL is not None and len(cells) > PARTNER_COL and isinstance(cells[PARTNER_COL], dict):
                 partner_cell = cells[PARTNER_COL]
-                if isinstance(partner_cell, dict):
-                    partner_text = str(partner_cell.get("value", "")).strip()
+                partner_value = str(partner_cell.get("value", "")).strip()
+                # เฉพาะเก็บถ้ามีข้อมูลจริง ๆ
+                if partner_value and partner_value.replace(" ", ""):
+                    partner_text = partner_value
             
-            # ดึงจาก NOTE_COL ถ้าหาเจอ
-            if NOTE_COL is not None and len(cells) > NOTE_COL:
+            # ดึงจาก NOTE_COL - ตรวจสอบให้เข้มงวด
+            if NOTE_COL is not None and len(cells) > NOTE_COL and isinstance(cells[NOTE_COL], dict):
                 note_cell = cells[NOTE_COL]
-                if isinstance(note_cell, dict):
-                    note_text = str(note_cell.get("value", "")).strip()
-            
-            # Filter ข้อมูลขยะ - ถ้ามี whitespace เท่านั้นให้ถือว่า empty
-            partner_text = partner_text if partner_text and partner_text.replace(" ", "") else ""
-            note_text = note_text if note_text and note_text.replace(" ", "") else ""
+                note_value = str(note_cell.get("value", "")).strip()
+                # เฉพาะเก็บถ้ามีข้อมูลจริง ๆ
+                if note_value and note_value.replace(" ", ""):
+                    note_text = note_value
             
             print(f"   ✅✅✅ {district_name} | FOUND FIRST RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
             
