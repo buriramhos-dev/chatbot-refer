@@ -301,25 +301,43 @@ def has_round_for_district(district_name):
         
         # ถ้าแถวนี้มีสีที่ถูกต้อง ให้เก็บไว้ (ใช้แถวบนสุดเมื่อมีหลายแถว)
         if has_valid_color:
-            # ดึง partner และ note จากเฉพาะแถวนี้
+            # ดึง partner และ note เฉพาะจากเซลล์ที่มีสี
             partner_text = ""
             note_text = ""
             
-            # ดึงจาก PARTNER_COL - ตรวจสอบให้เข้มงวด
+            # ดึงจาก PARTNER_COL - แต่ต้องตรวจสอบว่ามีสีด้วย
             if PARTNER_COL is not None and len(cells) > PARTNER_COL and isinstance(cells[PARTNER_COL], dict):
                 partner_cell = cells[PARTNER_COL]
                 partner_value = str(partner_cell.get("value", "")).strip()
-                # เฉพาะเก็บถ้ามีข้อมูลจริง ๆ
+                # เฉพาะเก็บถ้ามีข้อมูลและเซลล์นั้นมีสี
                 if partner_value and partner_value.replace(" ", ""):
-                    partner_text = partner_value
+                    # ตรวจสอบว่า partner cell มีสี
+                    partner_color_data = None
+                    for key in ["color", "backgroundColor", "bgColor", "fill", "background"]:
+                        if key in partner_cell and partner_cell[key]:
+                            partner_color_data = partner_cell[key]
+                            break
+                    
+                    # ถ้า partner cell มีสีที่ถูกต้องหรือไม่มีสี แต่อยู่ในแถวที่มีสี
+                    if partner_color_data is None or is_allowed_color(partner_color_data):
+                        partner_text = partner_value
             
-            # ดึงจาก NOTE_COL - ตรวจสอบให้เข้มงวด
+            # ดึงจาก NOTE_COL - แต่ต้องตรวจสอบว่ามีสีด้วย
             if NOTE_COL is not None and len(cells) > NOTE_COL and isinstance(cells[NOTE_COL], dict):
                 note_cell = cells[NOTE_COL]
                 note_value = str(note_cell.get("value", "")).strip()
-                # เฉพาะเก็บถ้ามีข้อมูลจริง ๆ
+                # เฉพาะเก็บถ้ามีข้อมูลและเซลล์นั้นมีสี
                 if note_value and note_value.replace(" ", ""):
-                    note_text = note_value
+                    # ตรวจสอบว่า note cell มีสี
+                    note_color_data = None
+                    for key in ["color", "backgroundColor", "bgColor", "fill", "background"]:
+                        if key in note_cell and note_cell[key]:
+                            note_color_data = note_cell[key]
+                            break
+                    
+                    # ถ้า note cell มีสีที่ถูกต้องหรือไม่มีสี แต่อยู่ในแถวที่มีสี
+                    if note_color_data is None or is_allowed_color(note_color_data):
+                        note_text = note_value
             
             print(f"   ✅✅✅ {district_name} | FOUND FIRST RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
             
