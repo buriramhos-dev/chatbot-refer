@@ -223,6 +223,7 @@ def has_round_for_district(district_name):
         ]
 
         has_valid_color = False
+        valid_color_col_idx = None
         
         for col_idx, col_name, c in color_cells:
             if not isinstance(c, dict):
@@ -269,17 +270,25 @@ def has_round_for_district(district_name):
             # ตรวจสอบสี
             if color_data and is_allowed_color(color_data):
                 has_valid_color = True
+                valid_color_col_idx = col_idx
                 print(f"   ✅✅ {district_name} | FOUND VALID COLOR in row {row_idx_display}, col {col_name}({col_idx}): {color_data}")
                 break
         
         # ถ้าแถวนี้มีสีที่ถูกต้อง ให้ return ทันที
         if has_valid_color:
-            partner_cell = cells[PARTNER_COL] if isinstance(cells[PARTNER_COL], dict) else {}
-            note_cell = cells[NOTE_COL] if isinstance(cells[NOTE_COL], dict) else {}
-            partner_text = str(partner_cell.get("value", "")).strip()
-            note_text = str(note_cell.get("value", "")).strip()
+            # ดึง partner และ note จาก column O (14) และ P (15) เสมอ
+            partner_cell = cells[PARTNER_COL] if len(cells) > PARTNER_COL and isinstance(cells[PARTNER_COL], dict) else {}
+            note_cell = cells[NOTE_COL] if len(cells) > NOTE_COL and isinstance(cells[NOTE_COL], dict) else {}
+            
+            # ดึง value อย่างเคร่งครัด - ถ้า empty ให้ default empty string
+            partner_text = str(partner_cell.get("value", "")).strip() if partner_cell.get("value") else ""
+            note_text = str(note_cell.get("value", "")).strip() if note_cell.get("value") else ""
+            
+            # Filter ข้อมูลขยะ - ถ้ามี whitespace เท่านั้นให้ถือว่า empty
+            partner_text = partner_text if partner_text and partner_text.replace(" ", "") else ""
+            note_text = note_text if note_text and note_text.replace(" ", "") else ""
 
-            print(f"   ✅✅✅ {district_name} | RETURNING RESULT from row {row_idx_display}")
+            print(f"   ✅✅✅ {district_name} | RETURNING RESULT from row {row_idx_display} | partner='{partner_text}' | note='{note_text}'")
             return {
                 "hospital": district_value,
                 "partner": partner_text,
