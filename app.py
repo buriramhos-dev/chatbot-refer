@@ -132,6 +132,14 @@ def update_sheet():
     # Debug: นับจำนวนแถว
     if isinstance(latest_sheet_data, dict):
         print(f"📊 Total rows: {len(latest_sheet_data)}")
+        # Debug: แสดงตัวอย่าง cell structure จากแถวแรกที่พบ
+        for row_idx, cells in list(latest_sheet_data.items())[:3]:
+            if isinstance(cells, list) and len(cells) > 10:
+                sample_cell = cells[10]  # Column K
+                if isinstance(sample_cell, dict):
+                    print(f"📋 Sample cell structure (Row {row_idx}, Col K): {list(sample_cell.keys())}")
+                    if "color" in sample_cell:
+                        print(f"   Color value: {sample_cell['color']} (type: {type(sample_cell['color'])})")
     return "OK", 200
 
 # ================== CORE CHECK ==================
@@ -189,9 +197,20 @@ def has_round_for_district(district_name):
 
         # ตรวจสอบสีจากแต่ละ cell อย่างครอบคลุม
         has_valid_color = False
+        
+        # Debug: แสดงข้อมูล cell ทั้งหมด
+        print(f"🔍 {district_name} | Row {row_idx} | Checking cells...")
+        print(f"   Cell K keys: {list(cells[DISTRICT_COL].keys()) if isinstance(cells[DISTRICT_COL], dict) else 'Not a dict'}")
+        print(f"   Cell O keys: {list(cells[PARTNER_COL].keys()) if isinstance(cells[PARTNER_COL], dict) else 'Not a dict'}")
+        print(f"   Cell P keys: {list(cells[NOTE_COL].keys()) if isinstance(cells[NOTE_COL], dict) else 'Not a dict'}")
+        
         for col_idx, col_name, c in color_cells:
             if not isinstance(c, dict):
+                print(f"   ⚠️ {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | Not a dict: {type(c)}")
                 continue
+            
+            # Debug: แสดง keys ทั้งหมดใน cell
+            print(f"   📋 {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | All keys: {list(c.keys())}")
             
             # ตรวจสอบทุก key ที่เป็นไปได้สำหรับ color
             color_data = None
@@ -206,15 +225,17 @@ def has_round_for_district(district_name):
                     if val:
                         color_data = val
                         found_key = key
+                        print(f"   ✅ Found color in key '{key}': {color_data} (type: {type(color_data)})")
                         break
             
             # ถ้ายังไม่มี ลองค้นหา keys ที่มีคำว่า "color" ในชื่อ
             if not color_data:
                 for key, value in c.items():
-                    if isinstance(key, str) and "color" in key.lower():
+                    if isinstance(key, str) and "color" in key.lower() and key not in priority_keys:
                         if value:
                             color_data = value
                             found_key = key
+                            print(f"   ✅ Found color in key '{key}': {color_data} (type: {type(color_data)})")
                             break
             
             # ถ้ายังไม่มี ลองดู values ทั้งหมดที่อาจเป็น color (hex string)
@@ -222,21 +243,25 @@ def has_round_for_district(district_name):
                 for key, value in c.items():
                     if isinstance(value, str):
                         value_clean = value.strip().upper()
-                        if value_clean.startswith("#") or (len(value_clean) == 6 and all(c in "0123456789ABCDEF" for c in value_clean)):
+                        if value_clean.startswith("#") or (len(value_clean) == 6 and all(ch in "0123456789ABCDEF" for ch in value_clean)):
                             color_data = value
                             found_key = key
+                            print(f"   ✅ Found hex color in key '{key}': {color_data}")
                             break
             
-            # Debug: แสดงข้อมูลสีที่พบ
-            if color_data:
+            # ถ้ายังไม่มี แสดงทุก values เพื่อ debug
+            if not color_data:
+                print(f"   ⚠️ {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | No color found. All values: {dict(c)}")
+            else:
+                # Debug: แสดงข้อมูลสีที่พบ
                 rgb = normalize_color_to_rgb(color_data)
                 is_valid = is_allowed_color(color_data) if color_data else False
-                print(f"🔍 {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | key={found_key} | color={color_data} | rgb={rgb} | valid={is_valid}")
+                print(f"   🎨 {district_name} | Row {row_idx} | Col {col_name}({col_idx}) | key={found_key} | color={color_data} | rgb={rgb} | valid={is_valid}")
             
             # ตรวจสอบสี
             if color_data and is_allowed_color(color_data):
                 has_valid_color = True
-                print(f"✅ {district_name} | Found valid color in row {row_idx}, col {col_name}({col_idx}): {color_data}")
+                print(f"   ✅✅ {district_name} | FOUND VALID COLOR in row {row_idx}, col {col_name}({col_idx}): {color_data}")
                 break
         
         # ถ้าแถวนี้มีสีที่ถูกต้อง ให้ return ทันที
