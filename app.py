@@ -9,11 +9,8 @@ import threading
 load_dotenv()
 app = Flask(__name__)
 
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
-
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
+line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
+handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
 # ================== DISTRICT CONFIG ==================
 BURIRAM_DISTRICTS = [
@@ -28,7 +25,7 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== COLOR LOGIC (ฟ้าและเหลืองเท่านั้น) ==================
+# ================== COLOR LOGIC (เน้นฟ้าและเหลือง) ==================
 def hex_to_rgb(hex_color):
     try:
         if not hex_color: return None
@@ -44,10 +41,10 @@ def is_allowed_color(color_hex):
     if not rgb: return False
 
     r, g, b = rgb
-    # 🔵 สีฟ้า (Blue-ish)
-    is_blue = (b >= 180 and g >= 150)
-    # 🟡 สีเหลือง (Yellow-ish)
-    is_yellow = (r >= 200 and g >= 180 and b <= 160)
+    # 🔵 สีฟ้า (ครอบคลุมฟ้าอ่อน/เข้ม)
+    is_blue = (b >= 150 and g >= 100)
+    # 🟡 สีเหลือง (ครอบคลุมเหลืองอ่อน/เข้ม)
+    is_yellow = (r >= 180 and g >= 150 and b <= 150)
     
     return is_blue or is_yellow
 
@@ -66,13 +63,14 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE ==================
+# ================== SEARCH CORE (ปรับปรุงการดึงข้อมูล) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     
-    K_INDEX = 10  # HOSPITAL
-    O_INDEX = 14  # พันธมิตร
-    P_INDEX = 15  # หมายเหตุ
+    # ดัชนีคอลัมน์อ้างอิง: J=9(WARD), K=10(HOSPITAL), O=14(พันธมิตร), P=15(หมายเหตุ)
+    K_INDEX = 10  
+    O_INDEX = 14  
+    P_INDEX = 15  
 
     with data_lock:
         working_data = latest_sheet_data.copy()
@@ -80,6 +78,7 @@ def get_district_info(district_name):
     if not working_data:
         return None
 
+    # แปลงคีย์เป็นตัวเลขเพื่อเรียงลำดับแถวจากบนลงล่าง
     try:
         sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
@@ -92,23 +91,19 @@ def get_district_info(district_name):
         if not isinstance(cells, list) or len(cells) <= K_INDEX:
             continue
 
-        h_cell = cells[K_INDEX] if len(cells) > K_INDEX else {}
-        o_cell = cells[O_INDEX] if len(cells) > O_INDEX else {}
-        p_cell = cells[P_INDEX] if len(cells) > P_INDEX else {}
-
+        h_cell = cells[K_INDEX]
         h_val = str(h_cell.get("value", "") or "").strip()
-        o_val = str(o_cell.get("value", "") or "").strip()
-        p_val = str(p_cell.get("value", "") or "").strip()
 
+        # 1. เช็คว่าชื่ออำเภอตรงกับคอลัมน์ HOSPITAL หรือไม่
         if target in h_val.replace(" ", ""):
-            # เช็คสีเฉพาะ ฟ้า หรือ เหลือง
-            has_valid_color = False
-            for cell_data in [h_cell, o_cell, p_cell]:
-                if is_allowed_color(cell_data.get("color")):
-                    has_valid_color = True
-                    break
             
-            if has_valid_color:
+            # 2. เช็คสี: แถวนั้นต้องมีสีฟ้าหรือเหลือง (เช็คจากช่อง Hospital เป็นหลัก)
+            if is_allowed_color(h_cell.get("color")):
+                
+                # 3. ดึงข้อมูล พันธมิตร (O) และ หมายเหตุ (P)
+                o_val = str(cells[O_INDEX].get("value", "") if len(cells) > O_INDEX else "").strip()
+                p_val = str(cells[P_INDEX].get("value", "") if len(cells) > P_INDEX else "").strip()
+
                 return {
                     "hospital": h_val,
                     "partner": o_val,
@@ -132,7 +127,6 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     if not sheet_ready:
-        # หากยังไม่มีข้อมูล ให้เงียบไว้หรือตอบกลับสั้นๆ
         return
 
     raw_text = event.message.text
@@ -149,6 +143,7 @@ def handle_message(event):
         info = get_district_info(d)
         if info:
             found_any = True
+            # ตอบข้อมูล: มีรับกลับของ โรงพยาบาล (พันธมิตร) (หมายเหตุ)
             msg = f"มีรับกลับของ {info['hospital']}"
             if info['partner']:
                 msg += f" ({info['partner']})"
