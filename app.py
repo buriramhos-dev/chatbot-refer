@@ -61,7 +61,6 @@ def update_sheet():
 
     with data_lock:
         latest_sheet_data = data["full_sheet_data"]
-        # กรองข้อมูลเบื้องต้นเพื่อให้จัดการง่ายขึ้น
         sheet_ready = True
 
     print(f"✅ Sheet synced: {len(latest_sheet_data)} rows")
@@ -71,9 +70,10 @@ def update_sheet():
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     
-    K_COL = 10  # Hospital
-    O_COL = 14  # Partner
-    P_COL = 15  # Note
+    # ดัชนีคอลัมน์ตาม Google Sheets (A=0, K=10, O=14, P=15)
+    K_INDEX = 10  # HOSPITAL
+    O_INDEX = 14  # พันธมิตร
+    P_INDEX = 15  # หมายเหตุ
 
     with data_lock:
         working_data = latest_sheet_data.copy()
@@ -82,36 +82,43 @@ def get_district_info(district_name):
         return None
 
     try:
-        sorted_rows = sorted(working_data.keys(), key=lambda x: int(x))
+        # เรียงลำดับแถวเพื่อให้ได้ข้อมูลที่อัปเดตล่าสุดตามลำดับชีท
+        sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
-        sorted_rows = working_data.keys()
+        sorted_keys = working_data.keys()
 
-    for row_idx in sorted_rows:
-        if str(row_idx) == "1": continue
+    for row_idx in sorted_keys:
+        if str(row_idx) == "1": continue  # ข้าม Header
         
         cells = working_data[row_idx]
-        if not isinstance(cells, list) or len(cells) <= K_COL:
+        if not isinstance(cells, list) or len(cells) <= K_INDEX:
             continue
 
-        hospital_cell = cells[K_COL] or {}
-        hospital_val = str(hospital_cell.get("value", "")).strip()
-        hospital_clean = hospital_val.replace(" ", "")
+        # ดึงข้อมูล Cell แบบป้องกัน Error กรณี Array สั้นกว่าที่กำหนด
+        h_cell = cells[K_INDEX] if len(cells) > K_INDEX else {}
+        o_cell = cells[O_INDEX] if len(cells) > O_INDEX else {}
+        p_cell = cells[P_INDEX] if len(cells) > P_INDEX else {}
 
-        if target in hospital_clean:
-            has_color = False
-            for col_idx in [K_COL, O_COL, P_COL]:
-                if len(cells) > col_idx:
-                    cell_info = cells[col_idx] or {}
-                    color = (cell_info.get("color") or "").strip()
-                    if is_allowed_color(color):
-                        has_color = True
-                        break
+        # ดึงค่า Value และล้างช่องว่าง
+        h_val = str(h_cell.get("value", "") or "").strip()
+        o_val = str(o_cell.get("value", "") or "").strip()
+        p_val = str(p_cell.get("value", "") or "").strip()
+
+        # 1. เช็คชื่อโรงพยาบาล/อำเภอ
+        if target in h_val.replace(" ", ""):
+            # 2. เช็คสีในคอลัมน์ K, O หรือ P
+            has_valid_color = False
+            for cell_data in [h_cell, o_cell, p_cell]:
+                if cell_data and is_allowed_color(cell_data.get("color")):
+                    has_valid_color = True
+                    break
             
-            if has_color:
+            # 3. ถ้าสีตรงเงื่อนไข ส่งข้อมูลกลับไปจัดรูปแบบ
+            if has_valid_color:
                 return {
-                    "hospital": hospital_val,
-                    "partner": str((cells[O_COL] or {}).get("value", "")).strip() if len(cells) > O_COL else "",
-                    "note": str((cells[P_COL] or {}).get("value", "")).strip() if len(cells) > P_COL else ""
+                    "hospital": h_val,
+                    "partner": o_val,
+                    "note": p_val
                 }
     
     return None
@@ -131,7 +138,7 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     if not sheet_ready:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ กำลังโหลดข้อมูล... กรุณารอสักครู่ค่ะ"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ กำลังเตรียมข้อมูล..."))
         return
 
     raw_text = event.message.text
@@ -148,7 +155,7 @@ def handle_message(event):
         info = get_district_info(d)
         if info:
             found_any = True
-            # --- รูปแบบข้อความ: มีรับกลับของ โรงพยาบาล (พันธมิตร) (หมายเหตุ) ---
+            # รูปแบบ: มีรับกลับของ โรงพยาบาล (พันธมิตร) (หมายเหตุ)
             msg = f"มีรับกลับของ {info['hospital']}"
             if info['partner']:
                 msg += f" ({info['partner']})"
@@ -158,18 +165,17 @@ def handle_message(event):
         else:
             results_text.append(f"ไม่มีรับกลับของ {d}")
 
-    # รวมทุกคำตอบเข้าด้วยกัน
-    final_text = "\n".join(results_text)
-    reply_messages = [TextSendMessage(text=final_text)]
+    # รวมทุกรายการส่งกลับในข้อความเดียว
+    final_reply = "\n".join(results_text)
+    reply_contents = [TextSendMessage(text=final_reply)]
     
-    # ถ้ามีอย่างน้อย 1 ที่มีรับกลับ ให้ส่งคำถามปิดท้าย
+    # ถ้ามีรายการที่มีรับกลับ ให้ส่งข้อความถามต่อ
     if found_any:
-        reply_messages.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ?"))
+        reply_contents.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ?"))
 
-    line_bot_api.reply_message(event.reply_token, reply_messages)
+    line_bot_api.reply_message(event.reply_token, reply_contents)
 
 # ================== RUN ==================
 if __name__ == "__main__":
-    # ใช้ค่า Port 5000 เป็นค่าเริ่มต้นสำหรับ Local และดึงจาก Environment สำหรับ Server
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
