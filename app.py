@@ -2,7 +2,6 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import traceback
 import os
 from dotenv import load_dotenv
 
@@ -34,15 +33,40 @@ def hex_to_rgb(hex_color):
         return None
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
-def is_allowed_color(color_hex):
-    rgb = hex_to_rgb(color_hex[:7]) if color_hex else None
-    if not rgb:
+def is_allowed_color(color):
+    if not color:
         return False
 
-    r, g, b = rgb
-    is_blue = b > 150 and g > 150 and r < 180
-    is_yellow = r > 200 and g > 200 and b < 180
-    return is_blue or is_yellow
+    color = color.lower().strip()
+
+    # ----- hex -----
+    if color.startswith("#"):
+        color = color[:7]
+
+        if color in ["#00ffff", "#ffff00"]:
+            return True
+
+        rgb = hex_to_rgb(color)
+        if not rgb:
+            return False
+
+        r, g, b = rgb
+        return (
+            (b > 150 and g > 150 and r < 150) or   # ฟ้า
+            (r > 200 and g > 200 and b < 150)     # เหลือง
+        )
+
+    # ----- rgb() -----
+    if color.startswith("rgb"):
+        nums = [int(n) for n in color if n.isdigit()]
+        if len(nums) >= 3:
+            r, g, b = nums[:3]
+            return (
+                (b > 150 and g > 150 and r < 150) or
+                (r > 200 and g > 200 and b < 150)
+            )
+
+    return False
 
 # ================== UPDATE ==================
 @app.route("/update", methods=["POST"])
@@ -71,42 +95,39 @@ def has_round_for_district(district_name):
 
     for row_idx, cells in latest_sheet_data.items():
 
-        if str(row_idx) == "1":
+        if str(row_idx) == "1":  # skip header
             continue
 
-        if not isinstance(cells, list):
+        if not isinstance(cells, list) or len(cells) <= NOTE_COL:
             continue
 
-        if len(cells) <= NOTE_COL:
-            continue
+        hospital_cell = cells[DISTRICT_COL] or {}
+        hospital_name = str(hospital_cell.get("value", "")).strip()
+        hospital_lower = hospital_name.lower()
 
-        # โรงพยาบาล
-        district_cell = cells[DISTRICT_COL] or {}
-        district_value = str(district_cell.get("value", "")).lower()
-
-        if district_name not in district_value:
+        if district_name not in hospital_lower:
             continue
 
         # เช็คสีเฉพาะ K Q R
-        color_cells = [
+        check_cells = [
             cells[DISTRICT_COL],
             cells[PARTNER_COL],
             cells[NOTE_COL]
         ]
 
         if not any(
-            is_allowed_color((c.get("color") or "").lower()[:7])
-            for c in color_cells if isinstance(c, dict)
+            is_allowed_color((c.get("color") or ""))
+            for c in check_cells if isinstance(c, dict)
         ):
             continue
 
-        partner_text = str((cells[PARTNER_COL] or {}).get("value", "")).strip()
-        note_text = str((cells[NOTE_COL] or {}).get("value", "")).strip()
+        partner = str((cells[PARTNER_COL] or {}).get("value", "")).strip()
+        note = str((cells[NOTE_COL] or {}).get("value", "")).strip()
 
         return {
-            "hospital": district_value,
-            "partner": partner_text,
-            "note": note_text
+            "hospital": hospital_name,
+            "partner": partner,
+            "note": note
         }
 
     return None
@@ -149,13 +170,14 @@ def handle_message(event):
         result = has_round_for_district(d)
         if result:
             follow = True
-            msg = f"มีรอบรับกลับ {d}"
+            msg = f"มีรอบรับกลับ {result['hospital']}"
             if result["partner"]:
                 msg += f" ({result['partner']})"
             if result["note"]:
                 msg += f" ({result['note']})"
         else:
             msg = f"ไม่มีรอบรับกลับ {d}"
+
         replies.append(msg)
 
     messages = [TextSendMessage(text="\n".join(replies))]
