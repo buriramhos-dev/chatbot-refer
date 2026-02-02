@@ -19,7 +19,7 @@ line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # ================== CONFIG ==================
-SHEET_TTL = 180  # 3 นาที
+SHEET_TTL = 180
 latest_sheet_data = None
 last_fetch_time = 0
 fetch_lock = threading.Lock()
@@ -34,31 +34,13 @@ BURIRAM_DISTRICTS = [
 ]
 
 # ================== COLOR ==================
-def get_background_color(cell: dict):
-    """
-    ดึง backgroundColor จาก Google Sheets cell
-    """
-    if not isinstance(cell, dict):
-        return None
-
-    fmt = cell.get("userEnteredFormat")
-    if not isinstance(fmt, dict):
-        return None
-
-    return fmt.get("backgroundColor")
-
 def normalize_color_to_rgb(color):
     if not isinstance(color, dict):
         return None
 
-    rgb = color.get("rgbColor")
-    if not rgb:
-        return None
-
-    r = int(float(rgb.get("red", 0)) * 255)
-    g = int(float(rgb.get("green", 0)) * 255)
-    b = int(float(rgb.get("blue", 0)) * 255)
-
+    r = int(float(color.get("red", 0)) * 255)
+    g = int(float(color.get("green", 0)) * 255)
+    b = int(float(color.get("blue", 0)) * 255)
     return (r, g, b)
 
 def is_allowed_color(background_color):
@@ -71,11 +53,10 @@ def is_allowed_color(background_color):
 
     r, g, b = rgb
 
-    # 💙 ฟ้า
     is_blue = (b >= 200 and g >= 200 and r <= 120)
-    # 💛 เหลือง
     is_yellow = (r >= 200 and g >= 200 and b <= 120)
 
+    print(f"🎨 RGB={rgb} | blue={is_blue} | yellow={is_yellow}")
     return is_blue or is_yellow
 
 # ================== FETCH SHEET ==================
@@ -104,20 +85,6 @@ def fetch_sheet_data(force=False):
         except Exception as e:
             print(f"❌ Fetch error: {e}")
 
-# ================== UPDATE FROM APPS SCRIPT ==================
-@app.route("/update", methods=["POST"])
-def update_sheet():
-    global latest_sheet_data, last_fetch_time
-    data = request.json
-
-    if not data or "full_sheet_data" not in data:
-        return "Invalid payload", 400
-
-    latest_sheet_data = data["full_sheet_data"]
-    last_fetch_time = time.time()
-    print("✅ Sheet pushed from Apps Script")
-    return "OK"
-
 # ================== CORE CHECK ==================
 def has_round_for_district(district_name):
     if not isinstance(latest_sheet_data, dict):
@@ -138,22 +105,26 @@ def has_round_for_district(district_name):
         if row_idx == "1" or not isinstance(cells, list):
             continue
 
-        district_cell = cells[DISTRICT_COL] if len(cells) > DISTRICT_COL else {}
-        hospital_name = str(district_cell.get("value", "")).strip()
+        if len(cells) <= NOTE_COL:
+            continue
+
+        hospital_cell = cells[DISTRICT_COL]
+        hospital_name = str(hospital_cell.get("value", "")).strip()
 
         if district_name not in hospital_name.lower():
             continue
 
-        # ✅ เช็คเฉพาะ "สีพื้นหลัง" ฟ้า / เหลือง
+        # ✅ เช็คสีจาก backgroundColor โดยตรง
         for col in [DISTRICT_COL, PARTNER_COL, NOTE_COL]:
-            if col < len(cells):
-                bg = get_background_color(cells[col])
-                if is_allowed_color(bg):
-                    return {
-                        "hospital": hospital_name,
-                        "partner": str(cells[PARTNER_COL].get("value", "")).strip(),
-                        "note": str(cells[NOTE_COL].get("value", "")).strip(),
-                    }
+            cell = cells[col]
+            bg = cell.get("backgroundColor")
+
+            if is_allowed_color(bg):
+                return {
+                    "hospital": hospital_name,
+                    "partner": str(cells[PARTNER_COL].get("value", "")).strip(),
+                    "note": str(cells[NOTE_COL].get("value", "")).strip(),
+                }
 
     return False
 
@@ -197,10 +168,6 @@ def handle_message(event):
 
     for d in districts:
         result = has_round_for_district(d)
-
-        if result is None:
-            fetch_sheet_data(force=True)
-            result = has_round_for_district(d)
 
         if isinstance(result, dict):
             follow = True
