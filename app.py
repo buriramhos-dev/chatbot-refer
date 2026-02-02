@@ -33,40 +33,26 @@ def hex_to_rgb(hex_color):
         return None
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
-def is_allowed_color(color):
-    if not color:
+def is_allowed_color(color_hex):
+    if not color_hex:
         return False
 
-    color = color.lower().strip()
+    rgb = hex_to_rgb(color_hex[:7])
+    if not rgb:
+        return False
 
-    # ----- hex -----
-    if color.startswith("#"):
-        color = color[:7]
+    r, g, b = rgb
 
-        if color in ["#00ffff", "#ffff00"]:
-            return True
+    # 🔵 ฟ้า / ฟ้าเขียว (cyan #00FFFF)
+    is_blue = (
+        (b >= 200 and g >= 200 and r <= 100) or   # cyan
+        (b >= 200 and g <= 200 and r <= 150)      # blue
+    )
 
-        rgb = hex_to_rgb(color)
-        if not rgb:
-            return False
+    # 🟡 เหลือง
+    is_yellow = (r >= 200 and g >= 200 and b <= 150)
 
-        r, g, b = rgb
-        return (
-            (b > 150 and g > 150 and r < 150) or   # ฟ้า
-            (r > 200 and g > 200 and b < 150)     # เหลือง
-        )
-
-    # ----- rgb() -----
-    if color.startswith("rgb"):
-        nums = [int(n) for n in color if n.isdigit()]
-        if len(nums) >= 3:
-            r, g, b = nums[:3]
-            return (
-                (b > 150 and g > 150 and r < 150) or
-                (r > 200 and g > 200 and b < 150)
-            )
-
-    return False
+    return is_blue or is_yellow
 
 # ================== UPDATE ==================
 @app.route("/update", methods=["POST"])
@@ -86,48 +72,42 @@ def update_sheet():
 def has_round_for_district(district_name):
     district_name = district_name.lower().strip()
 
-    DISTRICT_COL = 10   # K โรงพยาบาล
-    PARTNER_COL  = 16   # Q พันธมิตร
-    NOTE_COL     = 17   # R หมายเหตุ
+    DISTRICT_COL = 10   # K
+    PARTNER_COL  = 16   # Q
+    NOTE_COL     = 17   # R
 
     if not isinstance(latest_sheet_data, dict):
         return None
 
     for row_idx, cells in latest_sheet_data.items():
-
-        if str(row_idx) == "1":  # skip header
+        if str(row_idx) == "1":
             continue
 
         if not isinstance(cells, list) or len(cells) <= NOTE_COL:
             continue
 
-        hospital_cell = cells[DISTRICT_COL] or {}
-        hospital_name = str(hospital_cell.get("value", "")).strip()
-        hospital_lower = hospital_name.lower()
+        district_cell = cells[DISTRICT_COL] or {}
+        district_value = str(district_cell.get("value", "")).lower()
 
-        if district_name not in hospital_lower:
+        if district_name not in district_value:
             continue
 
-        # เช็คสีเฉพาะ K Q R
-        check_cells = [
+        color_cells = [
             cells[DISTRICT_COL],
             cells[PARTNER_COL],
             cells[NOTE_COL]
         ]
 
         if not any(
-            is_allowed_color((c.get("color") or ""))
-            for c in check_cells if isinstance(c, dict)
+            is_allowed_color((c.get("color") or "").lower())
+            for c in color_cells if isinstance(c, dict)
         ):
             continue
 
-        partner = str((cells[PARTNER_COL] or {}).get("value", "")).strip()
-        note = str((cells[NOTE_COL] or {}).get("value", "")).strip()
-
         return {
-            "hospital": hospital_name,
-            "partner": partner,
-            "note": note
+            "hospital": district_value,
+            "partner": str((cells[PARTNER_COL] or {}).get("value", "")).strip(),
+            "note": str((cells[NOTE_COL] or {}).get("value", "")).strip()
         }
 
     return None
@@ -170,14 +150,13 @@ def handle_message(event):
         result = has_round_for_district(d)
         if result:
             follow = True
-            msg = f"มีรอบรับกลับ {result['hospital']}"
+            msg = f"มีรอบรับกลับ {d}"
             if result["partner"]:
                 msg += f" ({result['partner']})"
             if result["note"]:
                 msg += f" ({result['note']})"
         else:
             msg = f"ไม่มีรอบรับกลับ {d}"
-
         replies.append(msg)
 
     messages = [TextSendMessage(text="\n".join(replies))]
