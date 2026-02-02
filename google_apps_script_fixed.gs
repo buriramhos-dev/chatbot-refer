@@ -100,20 +100,10 @@ function sendSheetToFlask() {
     }
 
     // ========== DEBUG: แสดง sample colors จากแถว 1-5 ==========
-    Logger.log("\n🎨 ===== DEBUG: Sample Colors =====");
-    for (var sampleRow = 1; sampleRow <= Math.min(5, lastRow); sampleRow++) {
-      Logger.log("\n📊 แถว " + sampleRow + ":");
-      if (full_sheet_data[sampleRow]) {
-        var sampleData = full_sheet_data[sampleRow];
-        for (var sampleCol = 0; sampleCol < Math.min(16, sampleData.length); sampleCol++) {
-          var cellData = sampleData[sampleCol];
-          if (cellData.backgroundColor) {
-            Logger.log("  🔹 Column " + sampleCol + ": value='" + cellData.value + "' | bg='" + cellData.backgroundColor + "'");
-          }
-        }
-      }
-    }
-    Logger.log("\n===== END DEBUG =====\n");
+    // Temporarily disabled to speed up testing
+    // Logger.log("\n🎨 ===== DEBUG: Sample Colors =====");
+    // ... (code removed)
+    // Logger.log("\n===== END DEBUG =====\n");
 
     var payload = {
       full_sheet_data: full_sheet_data,

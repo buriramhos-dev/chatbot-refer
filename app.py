@@ -222,6 +222,33 @@ def has_round_for_district(district_name):
         return None
 
     print(f"📊 Total rows in snapshot: {len(snapshot)}")
+    
+    # Debug: แสดงรายชื่อโรงพยาบาลทั้งหมดที่มีความสัมพันธ์กับคำค้นหา
+    matching_hospitals = set()
+    for row_idx, cells in snapshot.items():
+        if isinstance(cells, list) and len(cells) > DISTRICT_COL:
+            district_cell = cells[DISTRICT_COL]
+            if isinstance(district_cell, dict):
+                dist_val = str(district_cell.get("value", "")).lower().strip()
+                # เก็บ unique hospitals ที่เกี่ยวข้อง
+                if district_name in dist_val or dist_val in district_name or "พล" in dist_val:
+                    matching_hospitals.add(str(district_cell.get("value", "")).strip())
+    
+    if matching_hospitals:
+        print(f"📋 Hospitals in data matching '{district_name}':")
+        for hosp in sorted(matching_hospitals):
+            print(f"   - {hosp}")
+    else:
+        print(f"❌ No hospitals found matching '{district_name}'")
+        print(f"📋 Showing sample hospitals from first 5 rows:")
+        for row_idx in list(snapshot.keys())[:6]:
+            if row_idx != "1":
+                cells = snapshot.get(row_idx)
+                if isinstance(cells, list) and len(cells) > DISTRICT_COL:
+                    district_cell = cells[DISTRICT_COL]
+                    if isinstance(district_cell, dict):
+                        dist_val = str(district_cell.get("value", "")).strip()
+                        print(f"   Row {row_idx}: {dist_val}")
 
     # หา PARTNER_COL และ NOTE_COL จาก header (row 1)
     # ค้นหาจากชื่อ column หรือใช้ default
