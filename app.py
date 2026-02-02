@@ -2,15 +2,13 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import traceback
 import os
-from dotenv import load_dotenv
 import requests
-import threading
-import json
-from pathlib import Path
 import time
+import threading
+from dotenv import load_dotenv
 
+# ================== INIT ==================
 load_dotenv()
 app = Flask(__name__)
 
@@ -19,6 +17,12 @@ LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# ================== CONFIG ==================
+SHEET_TTL = 180  # 3 นาที
+latest_sheet_data = None
+last_fetch_time = 0
+fetch_lock = threading.Lock()
 
 # ================== DISTRICT ==================
 BURIRAM_DISTRICTS = [
@@ -29,378 +33,141 @@ BURIRAM_DISTRICTS = [
     "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
-# ================== CACHE SETTINGS ==================
-CACHE_FILE = "sheet_cache.json"
-CACHE_MAX_AGE = 24 * 3600  # 24 ชั่วโมง (วินาที)
-
-latest_sheet_data = None
-sheet_ready = False
-last_update_time = 0
-
 # ================== COLOR ==================
-def hex_to_rgb(hex_color):
-    if not hex_color:
-        return None
-    hex_color = str(hex_color).lstrip("#").strip()
-    if len(hex_color) != 6:
-        return None
-    try:
-        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    except (ValueError, IndexError):
-        return None
-
-def normalize_color_to_rgb(color_data):
-    """แปลงสีจากหลายรูปแบบเป็น RGB tuple"""
-    if not color_data:
-        return None
-    
-    # ถ้าเป็น string (hex)
-    if isinstance(color_data, str):
-        color_str = color_data.strip().upper()
-        
-        # กรอง empty string
-        if not color_str:
-            return None
-        
-        # ลบ whitespace และตรวจสอบรูปแบบ
-        if color_str.startswith("#"):
-            return hex_to_rgb(color_str)
-        elif len(color_str) == 6:
-            # ตรวจสอบว่าเป็น hex ที่ถูกต้อง
-            if all(c in "0123456789ABCDEF" for c in color_str):
-                return hex_to_rgb("#" + color_str)
-        elif len(color_str) == 7 and color_str[0] != "#":
-            # อาจมีรูปแบบอื่น
-            if all(c in "0123456789ABCDEF" for c in color_str[:6]):
-                return hex_to_rgb("#" + color_str[:6])
-        
-        # ลองแปลงโดยตรง
-        return hex_to_rgb(color_str)
-    
-    # ถ้าเป็น dict ที่มี red, green, blue (0.0-1.0 หรือ 0-255)
-    if isinstance(color_data, dict):
-        # ลองหา color key ที่มี nested dict (colorFormat API)
-        if "color" in color_data and isinstance(color_data["color"], dict):
-            return normalize_color_to_rgb(color_data["color"])
-        
-        # ลองหา rgbColor
-        if "rgbColor" in color_data:
-            try:
-                rgb = color_data["rgbColor"]
-                if isinstance(rgb, dict):
-                    r = int(float(rgb.get("red", 0)) * 255) if float(rgb.get("red", 0)) <= 1 else int(float(rgb.get("red", 0)))
-                    g = int(float(rgb.get("green", 0)) * 255) if float(rgb.get("green", 0)) <= 1 else int(float(rgb.get("green", 0)))
-                    b = int(float(rgb.get("blue", 0)) * 255) if float(rgb.get("blue", 0)) <= 1 else int(float(rgb.get("blue", 0)))
-                    return (r, g, b)
-            except (ValueError, TypeError, AttributeError):
-                pass
-        
-        # ลองหา red, green, blue (0.0-1.0)
-        if "red" in color_data and "green" in color_data and "blue" in color_data:
-            try:
-                red_val = float(color_data["red"])
-                green_val = float(color_data["green"])
-                blue_val = float(color_data["blue"])
-                
-                # ถ้าค่าอยู่ระหว่าง 0-1 ให้คูณ 255
-                if red_val <= 1 and green_val <= 1 and blue_val <= 1:
-                    r = int(red_val * 255)
-                    g = int(green_val * 255)
-                    b = int(blue_val * 255)
-                else:
-                    r = int(red_val)
-                    g = int(green_val)
-                    b = int(blue_val)
-                return (r, g, b)
-            except (ValueError, TypeError):
-                pass
-        
-        # ถ้ามี hex ใน dict
-        if "hex" in color_data:
-            return hex_to_rgb(color_data["hex"])
-    
-    return None
-
-def is_allowed_color(color_data):
-    """เช็คว่าสีเป็นสีฟ้าหรือสีเหลืองที่อนุญาต
-    - สีฟ้า: #00ffff (cyan) = RGB(0, 255, 255) - B และ G สูง, R ต่ำ
-    - สีเหลือง: #ffff00 (yellow) = RGB(255, 255, 0) - R และ G สูง, B ต่ำ
+def get_background_color(cell: dict):
     """
-    if not color_data:
-        return False
-    
-    # กรอง empty string
-    if isinstance(color_data, str) and not color_data.strip():
-        return False
-    
-    rgb = normalize_color_to_rgb(color_data)
+    ดึง backgroundColor จาก Google Sheets cell
+    """
+    if not isinstance(cell, dict):
+        return None
+
+    fmt = cell.get("userEnteredFormat")
+    if not isinstance(fmt, dict):
+        return None
+
+    return fmt.get("backgroundColor")
+
+def normalize_color_to_rgb(color):
+    if not isinstance(color, dict):
+        return None
+
+    rgb = color.get("rgbColor")
+    if not rgb:
+        return None
+
+    r = int(float(rgb.get("red", 0)) * 255)
+    g = int(float(rgb.get("green", 0)) * 255)
+    b = int(float(rgb.get("blue", 0)) * 255)
+
+    return (r, g, b)
+
+def is_allowed_color(background_color):
+    """
+    มีรับกลับ = สีฟ้า หรือ สีเหลือง เท่านั้น
+    """
+    rgb = normalize_color_to_rgb(background_color)
     if not rgb:
         return False
 
     r, g, b = rgb
-    
-    # Debug: แสดง RGB เพื่อตรวจสอบ
-    print(f"   🎨 Checking RGB({r}, {g}, {b})")
-    
-    # สีฟ้า (Cyan): #00ffff = (0, 255, 255) - B สูง, G สูง, R ต่ำ
-    is_blue = (b >= 200 and g >= 200 and r <= 100)
-    
-    # สีเหลือง (Yellow): #ffff00 = (255, 255, 0) - R สูง, G สูง, B ต่ำ
-    is_yellow = (r >= 200 and g >= 200 and b <= 50)
-    
-    # Debug: แสดง RGB และผลการตรวจสอบ
-    print(f"   ✓ RGB({r}, {g}, {b}) | Blue: {is_blue} | Yellow: {is_yellow}")
-    
-    # เฉพาะสีฟ้า + สีเหลือง = "มี"
+
+    # 💙 ฟ้า
+    is_blue = (b >= 200 and g >= 200 and r <= 120)
+    # 💛 เหลือง
+    is_yellow = (r >= 200 and g >= 200 and b <= 120)
+
     return is_blue or is_yellow
 
-# ================== UPDATE ==================
-def save_cache_to_file():
-    """บันทึกข้อมูลชีตลงไฟล์เพื่อใช้เมื่อเสิร์ฟเวอร์รีสตาร์ท"""
-    global last_update_time
-    try:
-        cache_data = {
-            "timestamp": time.time(),
-            "data": latest_sheet_data
-        }
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(cache_data, f, ensure_ascii=False, indent=2)
-        last_update_time = time.time()
-        print(f"💾 Cached to {CACHE_FILE}")
-    except Exception as e:
-        print(f"❌ Error saving cache: {e}")
+# ================== FETCH SHEET ==================
+def fetch_sheet_data(force=False):
+    global latest_sheet_data, last_fetch_time
 
-def load_cache_from_file():
-    """โหลดข้อมูลชีตจากไฟล์แคช"""
-    global latest_sheet_data, sheet_ready
-    try:
-        if not Path(CACHE_FILE).exists():
-            return False
-        
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            cache_data = json.load(f)
-        
-        cache_age = time.time() - cache_data.get("timestamp", 0)
-        
-        # ตรวจสอบอายุของแคช (ถ้ายังเป็นปัจจุบัน ให้ใช้)
-        if cache_age < CACHE_MAX_AGE and cache_data.get("data"):
-            latest_sheet_data = cache_data["data"]
-            sheet_ready = True
-            print(f"✅ Loaded cache from {CACHE_FILE} (age: {int(cache_age/60)}min)")
-            print(f"📊 Total rows: {len(latest_sheet_data)}")
-            return True
-        else:
-            print(f"⏳ Cache expired (age: {int(cache_age/3600)}h, max: {CACHE_MAX_AGE/3600}h)")
-            return False
-    except Exception as e:
-        print(f"⚠️ Error loading cache: {e}")
-        return False
+    with fetch_lock:
+        if not force and latest_sheet_data and time.time() - last_fetch_time < SHEET_TTL:
+            return
 
+        url = os.getenv("GOOGLE_APPS_SCRIPT_URL")
+        if not url:
+            print("❌ GOOGLE_APPS_SCRIPT_URL not set")
+            return
+
+        try:
+            print("🔄 Fetching Google Sheet...")
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+
+            if "full_sheet_data" in data:
+                latest_sheet_data = data["full_sheet_data"]
+                last_fetch_time = time.time()
+                print(f"✅ Sheet synced | rows={len(latest_sheet_data)}")
+        except Exception as e:
+            print(f"❌ Fetch error: {e}")
+
+# ================== UPDATE FROM APPS SCRIPT ==================
 @app.route("/update", methods=["POST"])
 def update_sheet():
-    global latest_sheet_data, sheet_ready
+    global latest_sheet_data, last_fetch_time
     data = request.json
 
     if not data or "full_sheet_data" not in data:
         return "Invalid payload", 400
 
     latest_sheet_data = data["full_sheet_data"]
-    sheet_ready = True
-    save_cache_to_file()  # 💾 บันทึกลงไฟล์
-    print("✅ Sheet synced")
-    # Debug: นับจำนวนแถว
-    if isinstance(latest_sheet_data, dict):
-        print(f"📊 Total rows: {len(latest_sheet_data)}")
-        # Debug: แสดงตัวอย่าง cell structure จากแถวแรกที่พบ
-        for row_idx, cells in list(latest_sheet_data.items())[:3]:
-            if isinstance(cells, list) and len(cells) > 10:
-                sample_cell = cells[10]  # Column K
-                if isinstance(sample_cell, dict):
-                    print(f"📋 Sample cell structure (Row {row_idx}, Col K): {list(sample_cell.keys())}")
-                    if "color" in sample_cell:
-                        print(f"   Color value: {sample_cell['color']} (type: {type(sample_cell['color'])})")
-    return "OK", 200
+    last_fetch_time = time.time()
+    print("✅ Sheet pushed from Apps Script")
+    return "OK"
 
 # ================== CORE CHECK ==================
 def has_round_for_district(district_name):
-    district_name = district_name.lower().strip()
-
-    DISTRICT_COL = 10   # K โรงพยาบาล
-    
     if not isinstance(latest_sheet_data, dict):
         return None
 
-    # หา PARTNER_COL และ NOTE_COL จาก header (row 1)
-    # ค้นหาจากชื่อ column หรือใช้ default
-    PARTNER_COL = 14  # Default column O
-    NOTE_COL = 15     # Default column P
-    
-    if "1" in latest_sheet_data:
-        header_row = latest_sheet_data["1"]
-        if isinstance(header_row, list):
-            for idx, cell in enumerate(header_row):
-                if isinstance(cell, dict):
-                    cell_value = str(cell.get("value", "")).lower().strip()
-                    # ค้นหาคอลัมน์พันธมิตร
-                    if "พันธมิตร" in cell_value:
-                        PARTNER_COL = idx
-                        print(f"📊 Found PARTNER_COL='{cell_value}' at index {idx}")
-                    # ค้นหาคอลัมน์หมายเหตุ
-                    if "หมายเหตุ" in cell_value or "remark" in cell_value:
-                        NOTE_COL = idx
-                        print(f"📊 Found NOTE_COL='{cell_value}' at index {idx}")
-    
-    print(f"📊 Using PARTNER_COL={PARTNER_COL}, NOTE_COL={NOTE_COL}")
+    DISTRICT_COL = 10
+    PARTNER_COL = 14
+    NOTE_COL = 15
 
-    # เรียง row_idx เป็นตัวเลขเพื่อให้ผลลัพธ์สม่ำเสมอ (ใช้ stable sort)
-    def get_row_key(item):
-        row_key = item[0]
-        try:
-            return int(row_key)
-        except (ValueError, TypeError):
-            return 999999
-    
-    sorted_rows = sorted(latest_sheet_data.items(), key=get_row_key)
-    
-    # เก็บผลลัพธ์ที่มีสีถูกต้องแถวแรก (ใช้แถวบนสุดเมื่อมีหลายแถว)
-    first_valid_result = None
-    
-    # ตรวจสอบแต่ละแถว - ถ้าเจอสีที่ถูกต้องให้เก็บไว้
-    for row_idx, cells in sorted_rows:
-        if str(row_idx) == "1":
+    district_name = district_name.lower()
+
+    rows = sorted(
+        latest_sheet_data.items(),
+        key=lambda x: int(x[0]) if x[0].isdigit() else 9999
+    )
+
+    for row_idx, cells in rows:
+        if row_idx == "1" or not isinstance(cells, list):
             continue
 
-        if not isinstance(cells, list):
+        district_cell = cells[DISTRICT_COL] if len(cells) > DISTRICT_COL else {}
+        hospital_name = str(district_cell.get("value", "")).strip()
+
+        if district_name not in hospital_name.lower():
             continue
 
-        if len(cells) <= NOTE_COL:
-            continue
+        # ✅ เช็คเฉพาะ "สีพื้นหลัง" ฟ้า / เหลือง
+        for col in [DISTRICT_COL, PARTNER_COL, NOTE_COL]:
+            if col < len(cells):
+                bg = get_background_color(cells[col])
+                if is_allowed_color(bg):
+                    return {
+                        "hospital": hospital_name,
+                        "partner": str(cells[PARTNER_COL].get("value", "")).strip(),
+                        "note": str(cells[NOTE_COL].get("value", "")).strip(),
+                    }
 
-        # โรงพยาบาล - เก็บชื่อจริงและตัวเปรียบเทียบแยกกัน
-        district_cell = cells[DISTRICT_COL] if isinstance(cells[DISTRICT_COL], dict) else {}
-        district_value_original = str(district_cell.get("value", "")).strip()  # ชื่อจริง
-        district_value = district_value_original.lower().strip()  # สำหรับเปรียบเทียบ
-
-        # เปรียบเทียบชื่ออำเภอให้ตรงกันมากขึ้น
-        if district_name not in district_value and district_value not in district_name:
-            continue
-
-        # เจอแถวที่ตรงกัน ตอนนี้เช็คสีเลย
-        row_idx_display = row_idx
-        print(f"🔍 {district_name} | Row {row_idx_display} | Found matching row, checking colors...")
-        
-        # เช็คสีเฉพาะ K O P
-        color_cells = [
-            (DISTRICT_COL, "K", cells[DISTRICT_COL]),
-            (PARTNER_COL, "O", cells[PARTNER_COL]),
-            (NOTE_COL, "P", cells[NOTE_COL])
-        ]
-
-        has_valid_color = False
-        valid_color_col_idx = None
-        
-        for col_idx, col_name, c in color_cells:
-            if not isinstance(c, dict):
-                print(f"   ⚠️ {district_name} | Row {row_idx_display} | Col {col_name}({col_idx}) | Not a dict: {type(c)}")
-                continue
-            
-            # ตรวจสอบทุก key ที่เป็นไปได้สำหรับ color
-            color_data = None
-            found_key = None
-            
-            # ลำดับความสำคัญ: color > backgroundColor > bgColor > fill > background
-            priority_keys = ["color", "backgroundColor", "bgColor", "fill", "background"]
-            for key in priority_keys:
-                if key in c:
-                    val = c[key]
-                    # รับค่าได้ทั้ง string, dict, หรือค่า truthy อื่นๆ
-                    if val:
-                        color_data = val
-                        found_key = key
-                        print(f"   ✅ Found color in key '{key}': {color_data} (type: {type(color_data)})")
-                        break
-            
-            # ถ้ายังไม่มี ลองค้นหา keys ที่มีคำว่า "color" ในชื่อ
-            if not color_data:
-                for key, value in c.items():
-                    if isinstance(key, str) and "color" in key.lower() and key not in priority_keys:
-                        if value:
-                            color_data = value
-                            found_key = key
-                            print(f"   ✅ Found color in key '{key}': {color_data} (type: {type(color_data)})")
-                            break
-            
-            # ถ้ายังไม่มี ลองดู values ทั้งหมดที่อาจเป็น color (hex string)
-            if not color_data:
-                for key, value in c.items():
-                    if isinstance(value, str):
-                        value_clean = value.strip().upper()
-                        if value_clean.startswith("#") or (len(value_clean) == 6 and all(ch in "0123456789ABCDEF" for ch in value_clean)):
-                            color_data = value
-                            found_key = key
-                            print(f"   ✅ Found hex color in key '{key}': {color_data}")
-                            break
-            
-            # ตรวจสอบสี
-            if color_data and is_allowed_color(color_data):
-                has_valid_color = True
-                valid_color_col_idx = col_idx
-                print(f"   ✅✅ {district_name} | FOUND VALID COLOR in row {row_idx_display}, col {col_name}({col_idx}): {color_data}")
-                break
-        
-        # ถ้าแถวนี้มีสีที่ถูกต้อง ให้เก็บไว้ (ใช้แถวบนสุดเมื่อมีหลายแถว)
-        if has_valid_color:
-            # ดึง partner และ note จากเฉพาะแถวนี้ (ไม่ต้องตรวจสอบสี)
-            partner_text = ""
-            note_text = ""
-            
-            # ดึงจาก PARTNER_COL
-            if PARTNER_COL is not None and len(cells) > PARTNER_COL and isinstance(cells[PARTNER_COL], dict):
-                partner_cell = cells[PARTNER_COL]
-                partner_value = str(partner_cell.get("value", "")).strip()
-                # เฉพาะเก็บถ้ามีข้อมูลจริง ๆ
-                if partner_value and partner_value.replace(" ", ""):
-                    partner_text = partner_value
-            
-            # ดึงจาก NOTE_COL
-            if NOTE_COL is not None and len(cells) > NOTE_COL and isinstance(cells[NOTE_COL], dict):
-                note_cell = cells[NOTE_COL]
-                note_value = str(note_cell.get("value", "")).strip()
-                # เฉพาะเก็บถ้ามีข้อมูลจริง ๆ
-                if note_value and note_value.replace(" ", ""):
-                    note_text = note_value
-            
-            print(f"   ✅✅✅ {district_name} | FOUND FIRST RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
-            
-            # เก็บผลลัพธ์แถวแรกเท่านั้น
-            if first_valid_result is None:
-                first_valid_result = {
-                    "hospital": district_value_original,  # ใช้ชื่อจริง ไม่ใช่ lowercase
-                    "partner": partner_text,
-                    "note": note_text
-                }
-    
-    # return ผลลัพธ์แถวบนสุด
-    if first_valid_result:
-        print(f"   ✅✅✅ {district_name} | RETURNING FINAL RESULT: {first_valid_result}")
-        return first_valid_result
-
-    return None
+    return False
 
 # ================== CALLBACK ==================
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature")
     body = request.get_data(as_text=True)
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
-    except Exception as e:
-        # จับข้อผิดพลาดทุกชนิดในการประมวลผล webhook เพื่อไม่ให้แอพล่ม
-        print(f"❌ Error handling webhook: {e}")
-        traceback.print_exc()
-        return "OK", 500
+
     return "OK"
 
 # ================== MESSAGE ==================
@@ -409,128 +176,50 @@ def handle_message(event):
     text = event.message.text.lower()
     districts = [d for d in BURIRAM_DISTRICTS if d.lower() in text]
 
-    # helper: safe reply to avoid crashing if LINE API fails
-    def safe_reply(reply_token, messages):
-        try:
-            line_bot_api.reply_message(reply_token, messages)
-            return True
-        except Exception as e:
-            print(f"❌ Failed to send reply: {e}")
-            traceback.print_exc()
-            return False
-
     if not districts:
-        safe_reply(
+        line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="❌ กรุณาระบุโรงพยาบาลในบุรีรัมย์")
+            TextSendMessage(text="❌ กรุณาระบุโรงพยาบาลในจังหวัดบุรีรัมย์")
         )
         return
 
-    # ✅ ถ้าไม่มีข้อมูล ให้พยายามดึงจากแคชและเสิร์ฟเวอร์
-    if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
-        print(f"⚠️ No sheet data in memory, trying to recover...")
-        
-        # ขั้นที่ 1: ลองโหลดจากแคช
-        if not load_cache_from_file():
-            # ขั้นที่ 2: ลองดึงจากเสิร์ฟเวอร์ (synchronous)
-            try:
-                google_apps_script_url = os.getenv("GOOGLE_APPS_SCRIPT_URL")
-                if google_apps_script_url:
-                    print("🔄 Fetching fresh data from server...")
-                    response = requests.get(google_apps_script_url, timeout=5)
-                    response.raise_for_status()
-                    data = response.json()
-                    if data and "full_sheet_data" in data:
-                        latest_sheet_data = data["full_sheet_data"]
-                        sheet_ready = True
-                        save_cache_to_file()
-                        print("✅ Recovered data from server")
-            except Exception as e:
-                print(f"⚠️ Failed to recover from server: {e}")
-        
-        # ถ้าเก็บได้ ให้ทำต่อได้เลย
-        if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
-            safe_reply(
-                event.reply_token,
-                TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
-            )
-            return
+    fetch_sheet_data()
+
+    if not isinstance(latest_sheet_data, dict):
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="⏳ กำลังซิงค์ข้อมูล กรุณาลองใหม่อีกครั้งค่ะ")
+        )
+        return
 
     replies = []
     follow = False
 
     for d in districts:
         result = has_round_for_district(d)
-        if result:
+
+        if result is None:
+            fetch_sheet_data(force=True)
+            result = has_round_for_district(d)
+
+        if isinstance(result, dict):
             follow = True
-            # รูปแบบ: มีรับกลับของ hospital(พันธมิตร ถ้ามี)(หมายเหตุ)
-            hospital_text = result["hospital"].strip() if result["hospital"] else ""
-            partner_text = result["partner"].strip() if result["partner"] else ""
-            note_text = result["note"].strip() if result["note"] else ""
-            
-            # เริ่มจาก "มีรับกลับของ"
-            msg = f"มีรับกลับของ {hospital_text if hospital_text else d}"
-            
-            # เพิ่มพันธมิตรถ้ามี
-            if partner_text:
-                msg += f"({partner_text})"
-            
-            # เพิ่มหมายเหตุถ้ามี
-            if note_text:
-                msg += f"({note_text})"
+            msg = f"มีรับกลับของ {result['hospital']}"
+            if result["partner"]:
+                msg += f" ({result['partner']})"
+            if result["note"]:
+                msg += f" ({result['note']})"
         else:
             msg = f"ไม่มีรอบรับกลับ {d}"
+
         replies.append(msg)
 
     messages = [TextSendMessage(text="\n".join(replies))]
     if follow:
         messages.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ"))
 
-    safe_reply(event.reply_token, messages)
+    line_bot_api.reply_message(event.reply_token, messages)
 
 # ================== RUN ==================
-def fetch_sheet_data():
-    """ดึงข้อมูล Google Sheets อัตโนมัติ"""
-    global latest_sheet_data, sheet_ready
-    
-    google_apps_script_url = os.getenv("GOOGLE_APPS_SCRIPT_URL")
-    if not google_apps_script_url:
-        print("❌ GOOGLE_APPS_SCRIPT_URL not found in environment variables")
-        # ลองโหลดจากแคชแทน
-        load_cache_from_file()
-        return
-    
-    try:
-        print("🔄 Fetching sheet data on startup...")
-        response = requests.get(google_apps_script_url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data and "full_sheet_data" in data:
-            latest_sheet_data = data["full_sheet_data"]
-            sheet_ready = True
-            save_cache_to_file()  # 💾 บันทึกลงไฟล์
-            print("✅ Sheet data loaded successfully on startup")
-            print(f"📊 Total rows: {len(latest_sheet_data)}")
-        else:
-            print("⚠️ Invalid response format from Google Apps Script")
-            load_cache_from_file()  # ลองโหลดจากแคชแทน
-    except requests.exceptions.Timeout:
-        print("⏱️ Request timeout - loading from cache...")
-        load_cache_from_file()
-    except requests.exceptions.RequestException as e:
-        print(f"⚠️ Error fetching sheet data: {e}")
-        load_cache_from_file()  # ลองโหลดจากแคชแทน
-    except Exception as e:
-        print(f"❌ Unexpected error: {e}")
-        load_cache_from_file()
-
 if __name__ == "__main__":
-    # 💾 โหลดแคชก่อน (เพื่อให้บอตพร้อมเลยถ้าเคยดึงมา)
-    load_cache_from_file()
-    
-    # ดึงข้อมูลในเธรดแยกเพื่อไม่บล็อก startup
-    fetch_thread = threading.Thread(target=fetch_sheet_data, daemon=True)
-    fetch_thread.start()
-    
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
