@@ -119,9 +119,9 @@ def normalize_color_to_rgb(color_data):
     return None
 
 def is_allowed_color(color_data):
-    """เช็คว่าสีเป็นสีฟ้าหรือสีเหลืองที่อนุญาต
-    - สีฟ้า: #00ffff (cyan) = RGB(0, 255, 255) - B และ G สูง, R ต่ำ
-    - สีเหลือง: #ffff00 (yellow) = RGB(255, 255, 0) - R และ G สูง, B ต่ำ
+    """เช็คว่าสีเป็นสีฟ้าหรือสีเหลืองที่อนุญาต (เท่านั้น)
+    - สีฟ้า (Cyan): #00ffff = (0, 255, 255)
+    - สีเหลือง (Yellow): #ffff00 = (255, 255, 0)
     """
     if not color_data:
         return False
@@ -142,9 +142,9 @@ def is_allowed_color(color_data):
 
     # distance-based detection (Euclidean)
     try:
-        threshold = float(os.getenv("SHEET_COLOR_THRESHOLD", "120"))
+        threshold = float(os.getenv("SHEET_COLOR_THRESHOLD", "80"))
     except Exception:
-        threshold = 120.0
+        threshold = 80.0
 
     def dist(a, b):
         return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
