@@ -175,9 +175,55 @@ def update_sheet():
         sheet_ready = True
         last_sheet_fetch_time = time.time()  # บันทึกเวลาอัปเดต
     print("✅ Sheet synced")
-    # Debug: นับจำนวนแถว
+    
+    # Debug: นับจำนวนแถวและแสดงข้อมูลที่ได้รับ
     if isinstance(latest_sheet_data, dict):
-        print(f"📊 Total rows: {len(latest_sheet_data)}")
+        print(f"📊 Total rows received: {len(latest_sheet_data)}")
+        
+        # แสดงโรงพยาบาลทั้งหมดที่มีสี (blue/yellow)
+        print(f"\n🔍 ===== DIAGNOSTIC: Hospitals with colors =====")
+        hospitals_with_color = {}
+        for row_idx, cells in sorted(latest_sheet_data.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+            if isinstance(cells, list) and len(cells) > 10:
+                # Column K = โรงพยาบาล (index 10)
+                district_cell = cells[10]
+                if isinstance(district_cell, dict):
+                    district_name = str(district_cell.get("value", "")).strip()
+                    
+                    # Check colors in K, O, P
+                    for col_idx in [10, 14, 15]:
+                        if col_idx < len(cells) and isinstance(cells[col_idx], dict):
+                            col_cell = cells[col_idx]
+                            col_names = ["K", "O", "P"]
+                            col_name = col_names[col_idx - 10] if col_idx >= 10 else f"Col{col_idx}"
+                            
+                            # Check all color keys
+                            for color_key in ["color", "backgroundColor", "bgColor", "fill", "background"]:
+                                if color_key in col_cell:
+                                    color_val = col_cell[color_key]
+                                    if color_val and str(color_val).strip():
+                                        # ทดสอบสี
+                                        rgb = normalize_color_to_rgb(color_val)
+                                        is_valid = is_allowed_color(color_val) if color_val else False
+                                        status = "✅" if is_valid else "❌"
+                                        print(f"   {status} Row {row_idx} | Hospital: {district_name} | Col {col_name} | Color: {color_val} | RGB: {rgb}")
+                                        
+                                        # เก็บข้อมูล
+                                        if district_name not in hospitals_with_color:
+                                            hospitals_with_color[district_name] = []
+                                        hospitals_with_color[district_name].append({
+                                            "row": row_idx,
+                                            "column": col_name,
+                                            "color": color_val,
+                                            "rgb": rgb,
+                                            "valid": is_valid
+                                        })
+        
+        print(f"\n📋 Summary: {len(hospitals_with_color)} hospitals with colors")
+        for hosp, colors in hospitals_with_color.items():
+            print(f"   - {hosp}: {len(colors)} color(s)")
+        print(f"===== END DIAGNOSTIC =====\n")
+        
         # Debug: แสดงตัวอย่าง cell structure จากแถวแรกที่พบ
         for row_idx, cells in list(latest_sheet_data.items())[:3]:
             if isinstance(cells, list) and len(cells) > 10:
@@ -210,6 +256,7 @@ def refresh_cache():
 # ================== CORE CHECK ==================
 def has_round_for_district(district_name):
     district_name = district_name.lower().strip()
+    print(f"\n🔍 ===== SEARCHING FOR: '{district_name}' =====")
 
     DISTRICT_COL = 10   # K โรงพยาบาล
     
@@ -218,7 +265,10 @@ def has_round_for_district(district_name):
         snapshot = latest_sheet_data
 
     if not isinstance(snapshot, dict):
+        print(f"❌ No data (snapshot is {type(snapshot)})")
         return None
+
+    print(f"📊 Total rows in snapshot: {len(snapshot)}")
 
     # หา PARTNER_COL และ NOTE_COL จาก header (row 1)
     # ค้นหาจากชื่อ column หรือใช้ default
@@ -251,6 +301,7 @@ def has_round_for_district(district_name):
             return 999999
     
     sorted_rows = sorted(snapshot.items(), key=get_row_key)
+    print(f"📋 Scanning {len(sorted_rows)} rows for '{district_name}'...")
 
     # เลือกแถวที่ใหม่ที่สุด (row index สูงสุด) ที่มีสีที่ถูกต้อง
     best_row_num = -1
@@ -278,7 +329,7 @@ def has_round_for_district(district_name):
 
         # เจอแถวที่ตรงกัน ตอนนี้เช็คสีเลย
         row_idx_display = row_idx
-        print(f"🔍 {district_name} | Row {row_idx_display} | Found matching row, checking colors...")
+        print(f"   ✅ Row {row_idx_display} | Hospital found: '{district_value_original}' | Checking colors...")
         
         # เช็คสีเฉพาะ K O P
         color_cells = [
@@ -385,9 +436,12 @@ def has_round_for_district(district_name):
     
     # return ผลลัพธ์จากแถวแรกที่ตรงกัน (ถ้ามี)
     if best_result:
-        print(f"   ✅✅✅ {district_name} | RETURNING FINAL RESULT (row {best_row_num}): {best_result}")
+        print(f"   ✅✅✅ FOUND RESULT for '{district_name}': {best_result}")
+        print(f"===== END SEARCH =====\n")
         return best_result
 
+    print(f"❌ NO MATCH found for '{district_name}'")
+    print(f"===== END SEARCH =====\n")
     return None
 
 # ================== CALLBACK ==================
