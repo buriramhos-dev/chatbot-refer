@@ -7,6 +7,9 @@ import os
 from dotenv import load_dotenv
 import requests
 import threading
+import json
+from pathlib import Path
+import time
 
 load_dotenv()
 app = Flask(__name__)
@@ -26,8 +29,13 @@ BURIRAM_DISTRICTS = [
     "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
+# ================== CACHE SETTINGS ==================
+CACHE_FILE = "sheet_cache.json"
+CACHE_MAX_AGE = 24 * 3600  # 24 ชั่วโมง (วินาที)
+
 latest_sheet_data = None
 sheet_ready = False
+last_update_time = 0
 
 # ================== COLOR ==================
 def hex_to_rgb(hex_color):
@@ -147,6 +155,47 @@ def is_allowed_color(color_data):
     return is_blue or is_yellow
 
 # ================== UPDATE ==================
+def save_cache_to_file():
+    """บันทึกข้อมูลชีตลงไฟล์เพื่อใช้เมื่อเสิร์ฟเวอร์รีสตาร์ท"""
+    global last_update_time
+    try:
+        cache_data = {
+            "timestamp": time.time(),
+            "data": latest_sheet_data
+        }
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        last_update_time = time.time()
+        print(f"💾 Cached to {CACHE_FILE}")
+    except Exception as e:
+        print(f"❌ Error saving cache: {e}")
+
+def load_cache_from_file():
+    """โหลดข้อมูลชีตจากไฟล์แคช"""
+    global latest_sheet_data, sheet_ready
+    try:
+        if not Path(CACHE_FILE).exists():
+            return False
+        
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            cache_data = json.load(f)
+        
+        cache_age = time.time() - cache_data.get("timestamp", 0)
+        
+        # ตรวจสอบอายุของแคช (ถ้ายังเป็นปัจจุบัน ให้ใช้)
+        if cache_age < CACHE_MAX_AGE and cache_data.get("data"):
+            latest_sheet_data = cache_data["data"]
+            sheet_ready = True
+            print(f"✅ Loaded cache from {CACHE_FILE} (age: {int(cache_age/60)}min)")
+            print(f"📊 Total rows: {len(latest_sheet_data)}")
+            return True
+        else:
+            print(f"⏳ Cache expired (age: {int(cache_age/3600)}h, max: {CACHE_MAX_AGE/3600}h)")
+            return False
+    except Exception as e:
+        print(f"⚠️ Error loading cache: {e}")
+        return False
+
 @app.route("/update", methods=["POST"])
 def update_sheet():
     global latest_sheet_data, sheet_ready
@@ -157,6 +206,7 @@ def update_sheet():
 
     latest_sheet_data = data["full_sheet_data"]
     sheet_ready = True
+    save_cache_to_file()  # 💾 บันทึกลงไฟล์
     print("✅ Sheet synced")
     # Debug: นับจำนวนแถว
     if isinstance(latest_sheet_data, dict):
@@ -361,12 +411,29 @@ def handle_message(event):
         )
         return
 
-    # ถ้ายังไม่มีข้อมูล ให้ดึงข้อมูลใหม่ทันที
+    # ✅ ถ้าไม่มีข้อมูล ให้พยายามดึงจากแคชและเสิร์ฟเวอร์
     if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
-        print(f"⚠️ No sheet data, fetching now...")
-        fetch_sheet_data()
+        print(f"⚠️ No sheet data in memory, trying to recover...")
         
-        # ถ้ายังไม่มีข้อมูลหลังดึง ให้ตอบ "กำลังซิงค์"
+        # ขั้นที่ 1: ลองโหลดจากแคช
+        if not load_cache_from_file():
+            # ขั้นที่ 2: ลองดึงจากเสิร์ฟเวอร์ (synchronous)
+            try:
+                google_apps_script_url = os.getenv("GOOGLE_APPS_SCRIPT_URL")
+                if google_apps_script_url:
+                    print("🔄 Fetching fresh data from server...")
+                    response = requests.get(google_apps_script_url, timeout=5)
+                    response.raise_for_status()
+                    data = response.json()
+                    if data and "full_sheet_data" in data:
+                        latest_sheet_data = data["full_sheet_data"]
+                        sheet_ready = True
+                        save_cache_to_file()
+                        print("✅ Recovered data from server")
+            except Exception as e:
+                print(f"⚠️ Failed to recover from server: {e}")
+        
+        # ถ้าเก็บได้ ให้ทำต่อได้เลย
         if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
             line_bot_api.reply_message(
                 event.reply_token,
@@ -414,6 +481,8 @@ def fetch_sheet_data():
     google_apps_script_url = os.getenv("GOOGLE_APPS_SCRIPT_URL")
     if not google_apps_script_url:
         print("❌ GOOGLE_APPS_SCRIPT_URL not found in environment variables")
+        # ลองโหลดจากแคชแทน
+        load_cache_from_file()
         return
     
     try:
@@ -425,18 +494,26 @@ def fetch_sheet_data():
         if data and "full_sheet_data" in data:
             latest_sheet_data = data["full_sheet_data"]
             sheet_ready = True
+            save_cache_to_file()  # 💾 บันทึกลงไฟล์
             print("✅ Sheet data loaded successfully on startup")
             print(f"📊 Total rows: {len(latest_sheet_data)}")
         else:
             print("⚠️ Invalid response format from Google Apps Script")
+            load_cache_from_file()  # ลองโหลดจากแคชแทน
     except requests.exceptions.Timeout:
-        print("⏱️ Request timeout - sheet data will be loaded on first user message")
+        print("⏱️ Request timeout - loading from cache...")
+        load_cache_from_file()
     except requests.exceptions.RequestException as e:
         print(f"⚠️ Error fetching sheet data: {e}")
+        load_cache_from_file()  # ลองโหลดจากแคชแทน
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
+        load_cache_from_file()
 
 if __name__ == "__main__":
+    # 💾 โหลดแคชก่อน (เพื่อให้บอตพร้อมเลยถ้าเคยดึงมา)
+    load_cache_from_file()
+    
     # ดึงข้อมูลในเธรดแยกเพื่อไม่บล็อก startup
     fetch_thread = threading.Thread(target=fetch_sheet_data, daemon=True)
     fetch_thread.start()
