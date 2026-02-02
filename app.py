@@ -31,7 +31,7 @@ BURIRAM_DISTRICTS = [
 latest_sheet_data = None
 sheet_ready = False
 last_sheet_fetch_time = None
-SHEET_CACHE_TIMEOUT = 5 * 60  # Refresh ทุก 5 นาที
+SHEET_CACHE_TIMEOUT = 15  # Refresh ทุก 30 วินาที
 data_lock = threading.Lock()
 
 # ================== COLOR ==================
