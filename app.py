@@ -173,6 +173,25 @@ def update_sheet():
                         print(f"   Color value: {sample_cell['color']} (type: {type(sample_cell['color'])})")
     return "OK", 200
 
+# ================== REFRESH ==================
+@app.route("/refresh-cache", methods=["GET"])
+def refresh_cache():
+    """บังคับ refresh ข้อมูลจาก Google Apps Script ทันที"""
+    print("🔄 Manual refresh requested...")
+    fetch_sheet_data()
+    
+    if latest_sheet_data and isinstance(latest_sheet_data, dict):
+        return {
+            "status": "success",
+            "message": f"Data refreshed ({len(latest_sheet_data)} rows)",
+            "timestamp": str(time.time())
+        }, 200
+    else:
+        return {
+            "status": "failed",
+            "message": "Could not fetch data from Google Apps Script"
+        }, 500
+
 # ================== CORE CHECK ==================
 def has_round_for_district(district_name):
     district_name = district_name.lower().strip()
