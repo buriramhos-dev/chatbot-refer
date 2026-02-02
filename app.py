@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import requests
 import threading
 import time
+import math
 
 load_dotenv()
 app = Flask(__name__)
@@ -31,6 +32,7 @@ latest_sheet_data = None
 sheet_ready = False
 last_sheet_fetch_time = None
 SHEET_CACHE_TIMEOUT = 5 * 60  # Refresh ทุก 5 นาที
+data_lock = threading.Lock()
 
 # ================== COLOR ==================
 def hex_to_rgb(hex_color):
@@ -133,19 +135,31 @@ def is_allowed_color(color_data):
         return False
 
     r, g, b = rgb
-    
-    # สีฟ้า (Cyan): #00ffff = (0, 255, 255) - B สูง, G สูง, R ต่ำ
-    is_blue = (b >= 200 and g >= 200 and r <= 100)
-    
-    # สีเหลือง (Yellow): #ffff00 = (255, 255, 0) - R สูง, G สูง, B ต่ำ
-    is_yellow = (r >= 200 and g >= 200 and b <= 50)
-    
-    # Debug: แสดง RGB และผลการตรวจสอบ
-    if is_blue or is_yellow:
-        print(f"   ✓ Found valid color! RGB({r}, {g}, {b}) | Blue: {is_blue} | Yellow: {is_yellow}")
-    
-    # เฉพาะสีฟ้า + สีเหลือง = "มี"
-    return is_blue or is_yellow
+
+    # basic heuristics
+    is_blue = (b >= 200 and g >= 200 and r <= 120)
+    is_yellow = (r >= 200 and g >= 200 and b <= 80)
+
+    # distance-based detection (Euclidean)
+    try:
+        threshold = float(os.getenv("SHEET_COLOR_THRESHOLD", "120"))
+    except Exception:
+        threshold = 120.0
+
+    def dist(a, b):
+        return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
+
+    blue_dist = dist((r, g, b), (0, 255, 255))
+    yellow_dist = dist((r, g, b), (255, 255, 0))
+
+    matched = is_blue or is_yellow or (blue_dist <= threshold) or (yellow_dist <= threshold)
+
+    if matched:
+        print(f"   ✓ Found valid color! RGB({r}, {g}, {b}) | heuristics Blue:{is_blue} Yellow:{is_yellow} | dist Blue:{blue_dist:.1f} Yellow:{yellow_dist:.1f} th={threshold}")
+        return True
+
+    print(f"   ❌ RGB({r}, {g}, {b}) not matched | heuristics Blue:{is_blue} Yellow:{is_yellow} | dist Blue:{blue_dist:.1f} Yellow:{yellow_dist:.1f} th={threshold}")
+    return False
 
 # ================== UPDATE ==================
 @app.route("/update", methods=["POST"])
@@ -156,9 +170,10 @@ def update_sheet():
     if not data or "full_sheet_data" not in data:
         return "Invalid payload", 400
 
-    latest_sheet_data = data["full_sheet_data"]
-    sheet_ready = True
-    last_sheet_fetch_time = time.time()  # บันทึกเวลาอัปเดต
+    with data_lock:
+        latest_sheet_data = data["full_sheet_data"]
+        sheet_ready = True
+        last_sheet_fetch_time = time.time()  # บันทึกเวลาอัปเดต
     print("✅ Sheet synced")
     # Debug: นับจำนวนแถว
     if isinstance(latest_sheet_data, dict):
@@ -198,7 +213,11 @@ def has_round_for_district(district_name):
 
     DISTRICT_COL = 10   # K โรงพยาบาล
     
-    if not isinstance(latest_sheet_data, dict):
+    # snapshot sheet data under lock to avoid race with updates
+    with data_lock:
+        snapshot = latest_sheet_data
+
+    if not isinstance(snapshot, dict):
         return None
 
     # หา PARTNER_COL และ NOTE_COL จาก header (row 1)
@@ -206,8 +225,8 @@ def has_round_for_district(district_name):
     PARTNER_COL = 14  # Default column O
     NOTE_COL = 15     # Default column P
     
-    if "1" in latest_sheet_data:
-        header_row = latest_sheet_data["1"]
+    if "1" in snapshot:
+        header_row = snapshot["1"]
         if isinstance(header_row, list):
             for idx, cell in enumerate(header_row):
                 if isinstance(cell, dict):
@@ -231,12 +250,13 @@ def has_round_for_district(district_name):
         except (ValueError, TypeError):
             return 999999
     
-    sorted_rows = sorted(latest_sheet_data.items(), key=get_row_key)
-    
-    # เก็บผลลัพธ์ที่มีสีถูกต้องแถวแรก (ใช้แถวบนสุดเมื่อมีหลายแถว)
-    first_valid_result = None
-    
-    # ตรวจสอบแต่ละแถว - ถ้าเจอสีที่ถูกต้องให้เก็บไว้
+    sorted_rows = sorted(snapshot.items(), key=get_row_key)
+
+    # เลือกแถวที่ใหม่ที่สุด (row index สูงสุด) ที่มีสีที่ถูกต้อง
+    best_row_num = -1
+    best_result = None
+
+    # ตรวจสอบแต่ละแถว - หาแถวที่ตรงกันและมีสีถูกต้อง
     for row_idx, cells in sorted_rows:
         if str(row_idx) == "1":
             continue
@@ -324,7 +344,7 @@ def has_round_for_district(district_name):
                     rgb = normalize_color_to_rgb(color_data)
                     print(f"   ❌ {district_name} | Row {row_idx_display} | Col {col_name} | Color {color_data} = RGB{rgb} (not blue/yellow)")
         
-        # ถ้าแถวนี้มีสีที่ถูกต้อง ให้เก็บไว้ (ใช้แถวบนสุดเมื่อมีหลายแถว)
+        # ถ้าแถวนี้มีสีที่ถูกต้อง ให้พิจารณาเก็บไว้ (เลือกแถวที่มี index มากที่สุด)
         if has_valid_color:
             # ดึง partner และ note จากเฉพาะแถวนี้ (ไม่ต้องตรวจสอบสี)
             partner_text = ""
@@ -345,21 +365,28 @@ def has_round_for_district(district_name):
                 # เฉพาะเก็บถ้ามีข้อมูลจริง ๆ
                 if note_value and note_value.replace(" ", ""):
                     note_text = note_value
-            
-            print(f"   ✅✅✅ {district_name} | FOUND FIRST RESULT from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
-            
-            # เก็บผลลัพธ์แถวแรกเท่านั้น
-            if first_valid_result is None:
-                first_valid_result = {
-                    "hospital": district_value_original,  # ใช้ชื่อจริง ไม่ใช่ lowercase
+            # ไม่ใช้ fallback: แสดงผลเฉพาะค่าที่ได้จาก PARTNER_COL / NOTE_COL
+            print(f"   ✅✅✅ {district_name} | FOUND candidate from row {row_idx_display} | hospital='{district_value_original}' | partner='{partner_text}' | note='{note_text}'")
+
+            # หาค่า row number เป็น int เพื่อเปรียบเทียบ (เลือกแถวแรกที่ตรงกัน = index ต่ำสุด)
+            try:
+                rnum = int(row_idx)
+            except Exception:
+                rnum = -1
+
+            # เก็บแถวแรกเท่านั้น (ถ้า best_row_num ยังเป็น -1 แสดงว่ายังไม่เก็บแถวไหนเลย)
+            if best_row_num == -1:
+                best_row_num = rnum
+                best_result = {
+                    "hospital": district_value_original,
                     "partner": partner_text,
                     "note": note_text
                 }
     
-    # return ผลลัพธ์แถวบนสุด
-    if first_valid_result:
-        print(f"   ✅✅✅ {district_name} | RETURNING FINAL RESULT: {first_valid_result}")
-        return first_valid_result
+    # return ผลลัพธ์จากแถวแรกที่ตรงกัน (ถ้ามี)
+    if best_result:
+        print(f"   ✅✅✅ {district_name} | RETURNING FINAL RESULT (row {best_row_num}): {best_result}")
+        return best_result
 
     return None
 
@@ -389,21 +416,27 @@ def handle_message(event):
         )
         return
 
-    # ตรวจสอบว่าข้อมูลหมดอายุหรือไม่
+    # ตรวจสอบว่าข้อมูลหมดอายุหรือไม่ (อ่านค่าภายใต้ lock เพื่อความสเถียร)
     import time
     current_time = time.time()
+    with data_lock:
+        snapshot_last = last_sheet_fetch_time
+        snapshot_data = latest_sheet_data
+
     is_data_expired = (
-        last_sheet_fetch_time is None or 
-        (current_time - last_sheet_fetch_time) > SHEET_CACHE_TIMEOUT
+        snapshot_last is None or 
+        (current_time - snapshot_last) > SHEET_CACHE_TIMEOUT
     )
-    
+
     # ถ้าไม่มีข้อมูล หรือข้อมูลหมดอายุ ให้ดึงข้อมูลใหม่
-    if not latest_sheet_data or not isinstance(latest_sheet_data, dict) or is_data_expired:
+    if not snapshot_data or not isinstance(snapshot_data, dict) or is_data_expired:
         print(f"⚠️ Refreshing sheet data (expired: {is_data_expired})...")
         fetch_sheet_data()
         
         # ถ้ายังไม่มีข้อมูลหลังดึง ให้ตอบ "กำลังซิงค์"
-        if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
+        with data_lock:
+            snapshot_data = latest_sheet_data
+        if not snapshot_data or not isinstance(snapshot_data, dict):
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
@@ -460,9 +493,10 @@ def fetch_sheet_data():
         data = response.json()
         
         if data and "full_sheet_data" in data:
-            latest_sheet_data = data["full_sheet_data"]
-            sheet_ready = True
-            last_sheet_fetch_time = time.time()  # บันทึกเวลาดึง
+            with data_lock:
+                latest_sheet_data = data["full_sheet_data"]
+                sheet_ready = True
+                last_sheet_fetch_time = time.time()  # บันทึกเวลาดึง
             print("✅ Sheet data loaded successfully on startup")
             print(f"📊 Total rows: {len(latest_sheet_data)}")
         else:
