@@ -360,13 +360,18 @@ def handle_message(event):
         )
         return
 
-    # ถ้ายังไม่มีข้อมูล
+    # ถ้ายังไม่มีข้อมูล ให้ดึงข้อมูลใหม่ทันที
     if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
-        )
-        return
+        print(f"⚠️ No sheet data, fetching now...")
+        fetch_sheet_data()
+        
+        # ถ้ายังไม่มีข้อมูลหลังดึง ให้ตอบ "กำลังซิงค์"
+        if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
+            )
+            return
 
     replies = []
     follow = False
