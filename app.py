@@ -28,7 +28,7 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== COLOR LOGIC (เฉพาะฟ้าและเหลือง) ==================
+# ================== COLOR LOGIC (ฟ้าและเหลืองเท่านั้น) ==================
 def hex_to_rgb(hex_color):
     try:
         if not hex_color: return None
@@ -63,14 +63,13 @@ def update_sheet():
         latest_sheet_data = data["full_sheet_data"]
         sheet_ready = True
 
-    print(f"✅ Sheet synced: {len(latest_sheet_data)} rows")
+    print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
 # ================== SEARCH CORE ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     
-    # ดัชนีคอลัมน์ (K=10, O=14, P=15)
     K_INDEX = 10  # HOSPITAL
     O_INDEX = 14  # พันธมิตร
     P_INDEX = 15  # หมายเหตุ
@@ -101,9 +100,8 @@ def get_district_info(district_name):
         o_val = str(o_cell.get("value", "") or "").strip()
         p_val = str(p_cell.get("value", "") or "").strip()
 
-        # ตรวจสอบชื่ออำเภอ
         if target in h_val.replace(" ", ""):
-            # ตรวจสอบสี (เฉพาะฟ้า หรือ เหลือง)
+            # เช็คสีเฉพาะ ฟ้า หรือ เหลือง
             has_valid_color = False
             for cell_data in [h_cell, o_cell, p_cell]:
                 if is_allowed_color(cell_data.get("color")):
@@ -119,11 +117,22 @@ def get_district_info(district_name):
     
     return None
 
+# ================== LINE CALLBACK ==================
+@app.route("/callback", methods=["POST"])
+def callback():
+    signature = request.headers.get("X-Line-Signature")
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return "OK"
+
 # ================== MESSAGE HANDLER ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     if not sheet_ready:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ กำลังเตรียมข้อมูล..."))
+        # หากยังไม่มีข้อมูล ให้เงียบไว้หรือตอบกลับสั้นๆ
         return
 
     raw_text = event.message.text
@@ -140,25 +149,21 @@ def handle_message(event):
         info = get_district_info(d)
         if info:
             found_any = True
-            # รูปแบบคำตอบ: โรงพยาบาล (พันธมิตร) (หมายเหตุ)
             msg = f"มีรับกลับของ {info['hospital']}"
             if info['partner']:
                 msg += f" ({info['partner']})"
             if info['note']:
                 msg += f" ({info['note']})"
             results_text.append(msg)
-        # ถ้าไม่พบข้อมูลที่มีสีฟ้า/เหลือง หรือชื่อไม่ตรง จะไม่ถูกเพิ่มเข้า results_text ในแบบแจ้งว่า "มี"
 
-    if not results_text:
-        return
+    if results_text:
+        final_reply = "\n".join(results_text)
+        reply_contents = [TextSendMessage(text=final_reply)]
+        
+        if found_any:
+            reply_contents.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ?"))
 
-    final_reply = "\n".join(results_text)
-    reply_contents = [TextSendMessage(text=final_reply)]
-    
-    if found_any:
-        reply_contents.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ?"))
-
-    line_bot_api.reply_message(event.reply_token, reply_contents)
+        line_bot_api.reply_message(event.reply_token, reply_contents)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
