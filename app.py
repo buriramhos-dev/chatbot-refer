@@ -165,74 +165,27 @@ def is_allowed_color(color_data):
 @app.route("/update", methods=["POST"])
 def update_sheet():
     global latest_sheet_data, sheet_ready, last_sheet_fetch_time
-    data = request.json
+    try:
+        data = request.json
 
-    if not data or "full_sheet_data" not in data:
-        return "Invalid payload", 400
+        if not data or "full_sheet_data" not in data:
+            return "Invalid payload", 400
 
-    with data_lock:
-        latest_sheet_data = data["full_sheet_data"]
-        sheet_ready = True
-        last_sheet_fetch_time = time.time()  # บันทึกเวลาอัปเดต
-    print("✅ Sheet synced")
-    
-    # Debug: นับจำนวนแถวและแสดงข้อมูลที่ได้รับ
-    if isinstance(latest_sheet_data, dict):
-        print(f"📊 Total rows received: {len(latest_sheet_data)}")
+        with data_lock:
+            latest_sheet_data = data["full_sheet_data"]
+            sheet_ready = True
+            last_sheet_fetch_time = time.time()  # บันทึกเวลาอัปเดต
+        print("✅ Sheet synced")
         
-        # แสดงโรงพยาบาลทั้งหมดที่มีสี (blue/yellow)
-        print(f"\n🔍 ===== DIAGNOSTIC: Hospitals with colors =====")
-        hospitals_with_color = {}
-        for row_idx, cells in sorted(latest_sheet_data.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
-            if isinstance(cells, list) and len(cells) > 10:
-                # Column K = โรงพยาบาล (index 10)
-                district_cell = cells[10]
-                if isinstance(district_cell, dict):
-                    district_name = str(district_cell.get("value", "")).strip()
-                    
-                    # Check colors in K, O, P
-                    for col_idx in [10, 14, 15]:
-                        if col_idx < len(cells) and isinstance(cells[col_idx], dict):
-                            col_cell = cells[col_idx]
-                            col_names = ["K", "O", "P"]
-                            col_name = col_names[col_idx - 10] if col_idx >= 10 else f"Col{col_idx}"
-                            
-                            # Check all color keys
-                            for color_key in ["color", "backgroundColor", "bgColor", "fill", "background"]:
-                                if color_key in col_cell:
-                                    color_val = col_cell[color_key]
-                                    if color_val and str(color_val).strip():
-                                        # ทดสอบสี
-                                        rgb = normalize_color_to_rgb(color_val)
-                                        is_valid = is_allowed_color(color_val) if color_val else False
-                                        status = "✅" if is_valid else "❌"
-                                        print(f"   {status} Row {row_idx} | Hospital: {district_name} | Col {col_name} | Color: {color_val} | RGB: {rgb}")
-                                        
-                                        # เก็บข้อมูล
-                                        if district_name not in hospitals_with_color:
-                                            hospitals_with_color[district_name] = []
-                                        hospitals_with_color[district_name].append({
-                                            "row": row_idx,
-                                            "column": col_name,
-                                            "color": color_val,
-                                            "rgb": rgb,
-                                            "valid": is_valid
-                                        })
-        
-        print(f"\n📋 Summary: {len(hospitals_with_color)} hospitals with colors")
-        for hosp, colors in hospitals_with_color.items():
-            print(f"   - {hosp}: {len(colors)} color(s)")
-        print(f"===== END DIAGNOSTIC =====\n")
-        
-        # Debug: แสดงตัวอย่าง cell structure จากแถวแรกที่พบ
-        for row_idx, cells in list(latest_sheet_data.items())[:3]:
-            if isinstance(cells, list) and len(cells) > 10:
-                sample_cell = cells[10]  # Column K
-                if isinstance(sample_cell, dict):
-                    print(f"📋 Sample cell structure (Row {row_idx}, Col K): {list(sample_cell.keys())}")
-                    if "color" in sample_cell:
-                        print(f"   Color value: {sample_cell['color']} (type: {type(sample_cell['color'])})")
-    return "OK", 200
+        # Debug: นับจำนวนแถว
+        if isinstance(latest_sheet_data, dict):
+            print(f"📊 Total rows received: {len(latest_sheet_data)}")
+        return "OK", 200
+    except Exception as e:
+        print(f"❌ Error in /update: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return "Error", 500
 
 # ================== REFRESH ==================
 @app.route("/refresh-cache", methods=["GET"])
