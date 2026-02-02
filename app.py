@@ -318,6 +318,11 @@ def has_round_for_district(district_name):
                 valid_color_col_idx = col_idx
                 print(f"   ✅✅ {district_name} | FOUND VALID COLOR in row {row_idx_display}, col {col_name}({col_idx}): {color_data}")
                 break
+            else:
+                # Debug: แสดงสีที่ไม่ถูกต้อง
+                if color_data:
+                    rgb = normalize_color_to_rgb(color_data)
+                    print(f"   ❌ {district_name} | Row {row_idx_display} | Col {col_name} | Color {color_data} = RGB{rgb} (not blue/yellow)")
         
         # ถ้าแถวนี้มีสีที่ถูกต้อง ให้เก็บไว้ (ใช้แถวบนสุดเมื่อมีหลายแถว)
         if has_valid_color:
