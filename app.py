@@ -56,22 +56,27 @@ def normalize_color_to_rgb(color_data):
         return None
 
 
-def is_allowed_color(color_data):
+def get_color_type(color_data):
     """
-    อนุญาตเฉพาะ:
-    - สีฟ้า (cyan)
-    - สีเหลือง
+    ตรวจสอบประเภทสี:
+    - 'blue': สีฟ้า (มีรับกลับ)
+    - 'yellow': สีเหลือง (มีรับกลับแบบอื่น)
+    - None: สีอื่นๆ (ไม่มีรับกลับ)
     """
     rgb = normalize_color_to_rgb(color_data)
     if not rgb:
-        return False
+        return None
 
     r, g, b = rgb
 
     is_blue = (b >= 200 and g >= 200 and r <= 100)
     is_yellow = (r >= 200 and g >= 200 and b <= 100)
 
-    return is_blue or is_yellow
+    if is_blue:
+        return 'blue'
+    elif is_yellow:
+        return 'yellow'
+    return None
 
 # ==================== SHEET ====================
 def fetch_sheet_data():
@@ -141,7 +146,9 @@ def has_round_for_district(district_name):
                 continue
 
             bg = cell.get("backgroundColor")
-            if is_allowed_color(bg):
+            color_type = get_color_type(bg)
+            
+            if color_type:
                 return {
                     "hospital": hospital_name,
                     "partner": str(cells[PARTNER_COL].get("value", "")).strip(),
@@ -187,25 +194,25 @@ def handle_message(event):
         return
 
     replies = []
-    follow = False
+    has_available = False
 
     for d in districts:
         result = has_round_for_district(d)
 
         if result:
-            follow = True
-            msg = f"มีรับกลับของ {result['hospital']}"
+            has_available = True
+            msg = f"✅ มีรับกลับ {result['hospital']}"
             if result["partner"]:
                 msg += f" ({result['partner']})"
             if result["note"]:
-                msg += f" ({result['note']})"
+                msg += f" {result['note']}"
         else:
-            msg = f"ไม่มีรอบรับกลับ {d}"
+            msg = f"❌ ไม่มีรอบรับกลับ {d}"
 
         replies.append(msg)
 
     messages = [TextSendMessage(text="\n".join(replies))]
-    if follow:
+    if has_available:
         messages.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ"))
 
     line_bot_api.reply_message(event.reply_token, messages)
