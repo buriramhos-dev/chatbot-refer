@@ -43,8 +43,11 @@ def is_allowed_color(color_hex):
 
     r, g, b = rgb
 
-    # 🔵 ฟ้า / cyan (#00FFFF)
-    is_blue = (r <= 100 and g >= 200 and b >= 200)
+    # 🔵 ฟ้า / ฟ้าเขียว
+    is_blue = (
+        (b >= 200 and g >= 200 and r <= 120) or
+        (b >= 200 and g <= 200 and r <= 150)
+    )
 
     # 🟡 เหลือง
     is_yellow = (r >= 200 and g >= 200 and b <= 150)
@@ -69,7 +72,7 @@ def update_sheet():
 def has_round_for_district(district_name):
     district_name = district_name.lower().strip()
 
-    # ✅ ใช้คอลัมน์จริงจากชีท
+    # คอลัมน์จริงจากชีท
     K_COL = 10  # HOSPITAL
     O_COL = 14  # พันธมิตร
     P_COL = 15  # หมายเหตุ
@@ -82,17 +85,15 @@ def has_round_for_district(district_name):
         if str(row_idx) == "1":
             continue
 
-        if not isinstance(cells, list):
-            continue
-
-        if len(cells) <= K_COL:
+        if not isinstance(cells, list) or len(cells) <= K_COL:
             continue
 
         # ===== HOSPITAL =====
         hospital_cell = cells[K_COL] or {}
-        hospital_value = str(hospital_cell.get("value", "")).lower()
+        hospital_text = str(hospital_cell.get("value", "")).strip()
+        hospital_lower = hospital_text.lower()
 
-        if district_name not in hospital_value:
+        if district_name not in hospital_lower:
             continue
 
         # ===== เช็คสี K / O / P =====
@@ -118,7 +119,7 @@ def has_round_for_district(district_name):
             note_text = str((cells[P_COL] or {}).get("value", "")).strip()
 
         return {
-            "hospital": hospital_value,
+            "hospital": hospital_text,
             "partner": partner_text,
             "note": note_text
         }
@@ -163,13 +164,14 @@ def handle_message(event):
         result = has_round_for_district(d)
         if result:
             follow = True
-            msg = f"มีรอบรับกลับ {d}"
+            msg = f"มีรับกลับของ {result['hospital']}"
             if result["partner"]:
-                msg += f"\nพันธมิตร: {result['partner']}"
+                msg += f" ({result['partner']})"
             if result["note"]:
-                msg += f"\nหมายเหตุ: {result['note']}"
+                msg += f" ({result['note']})"
         else:
-            msg = f"ไม่มีรอบรับกลับ {d}"
+            msg = f"ไม่มีรับกลับของ {d}"
+
         replies.append(msg)
 
     messages = [TextSendMessage(text="\n".join(replies))]
