@@ -25,7 +25,7 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== COLOR LOGIC (เน้นฟ้าและเหลือง) ==================
+# ================== COLOR LOGIC (เฉพาะฟ้าและเหลือง) ==================
 def hex_to_rgb(hex_color):
     try:
         if not hex_color: return None
@@ -41,10 +41,9 @@ def is_allowed_color(color_hex):
     if not rgb: return False
 
     r, g, b = rgb
-    # 🔵 สีฟ้า (ครอบคลุมฟ้าอ่อน/เข้ม)
-    is_blue = (b >= 150 and g >= 100)
-    # 🟡 สีเหลือง (ครอบคลุมเหลืองอ่อน/เข้ม)
-    is_yellow = (r >= 180 and g >= 150 and b <= 150)
+    # 🔵 สีฟ้า และ 🟡 สีเหลือง (ตัดสีชมพูและเขียวออก)
+    is_blue = (b >= 180 and g >= 150)
+    is_yellow = (r >= 200 and g >= 180 and b <= 160)
     
     return is_blue or is_yellow
 
@@ -63,14 +62,14 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE (ปรับปรุงการดึงข้อมูล) ==================
+# ================== SEARCH CORE (ดึงข้อมูล O และ P) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     
-    # ดัชนีคอลัมน์อ้างอิง: J=9(WARD), K=10(HOSPITAL), O=14(พันธมิตร), P=15(หมายเหตุ)
-    K_INDEX = 10  
-    O_INDEX = 14  
-    P_INDEX = 15  
+    # อ้างอิง Index จากตาราง: K=10, O=14, P=15
+    K_INDEX = 10  # HOSPITAL
+    O_INDEX = 14  # พันธมิตร
+    P_INDEX = 15  # หมายเหตุ
 
     with data_lock:
         working_data = latest_sheet_data.copy()
@@ -78,7 +77,7 @@ def get_district_info(district_name):
     if not working_data:
         return None
 
-    # แปลงคีย์เป็นตัวเลขเพื่อเรียงลำดับแถวจากบนลงล่าง
+    # เรียงลำดับแถวเพื่อให้ได้ข้อมูลที่ถูกต้อง
     try:
         sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
@@ -88,27 +87,24 @@ def get_district_info(district_name):
         if str(row_idx) == "1": continue 
         
         cells = working_data[row_idx]
-        if not isinstance(cells, list) or len(cells) <= K_INDEX:
+        if not isinstance(cells, list) or len(cells) <= P_INDEX:
             continue
 
         h_cell = cells[K_INDEX]
         h_val = str(h_cell.get("value", "") or "").strip()
 
-        # 1. เช็คว่าชื่ออำเภอตรงกับคอลัมน์ HOSPITAL หรือไม่
-        if target in h_val.replace(" ", ""):
+        # ตรวจสอบชื่ออำเภอแบบตรงตัว และต้องเป็นสีฟ้า/เหลืองเท่านั้น
+        if target == h_val and is_allowed_color(h_cell.get("color")):
             
-            # 2. เช็คสี: แถวนั้นต้องมีสีฟ้าหรือเหลือง (เช็คจากช่อง Hospital เป็นหลัก)
-            if is_allowed_color(h_cell.get("color")):
-                
-                # 3. ดึงข้อมูล พันธมิตร (O) และ หมายเหตุ (P)
-                o_val = str(cells[O_INDEX].get("value", "") if len(cells) > O_INDEX else "").strip()
-                p_val = str(cells[P_INDEX].get("value", "") if len(cells) > P_INDEX else "").strip()
+            # ดึงข้อมูล พันธมิตร (O) และ หมายเหตุ (P)
+            partner = str(cells[O_INDEX].get("value", "") or "").strip()
+            note = str(cells[P_INDEX].get("value", "") or "").strip()
 
-                return {
-                    "hospital": h_val,
-                    "partner": o_val,
-                    "note": p_val
-                }
+            return {
+                "hospital": h_val,
+                "partner": partner,
+                "note": note
+            }
     
     return None
 
@@ -129,36 +125,30 @@ def handle_message(event):
     if not sheet_ready:
         return
 
-    raw_text = event.message.text
-    clean_user_text = raw_text.replace(" ", "")
-    matched_districts = [d for d in BURIRAM_DISTRICTS if d.replace(" ", "") in clean_user_text]
+    raw_text = event.message.text.strip()
+    # ค้นหาอำเภอที่ตรงกับข้อความที่พิมพ์มา
+    matched_district = next((d for d in BURIRAM_DISTRICTS if d in raw_text), None)
 
-    if not matched_districts:
+    if not matched_district:
         return
 
-    results_text = []
-    found_any = False
-
-    for d in matched_districts:
-        info = get_district_info(d)
-        if info:
-            found_any = True
-            # ตอบข้อมูล: มีรับกลับของ โรงพยาบาล (พันธมิตร) (หมายเหตุ)
-            msg = f"มีรับกลับของ {info['hospital']}"
-            if info['partner']:
-                msg += f" ({info['partner']})"
-            if info['note']:
-                msg += f" ({info['note']})"
-            results_text.append(msg)
-
-    if results_text:
-        final_reply = "\n".join(results_text)
-        reply_contents = [TextSendMessage(text=final_reply)]
+    info = get_district_info(matched_district)
+    
+    if info:
+        # รวมข้อมูล พันธมิตร และ หมายเหตุ เข้าด้วยกัน
+        details = []
+        if info['partner']: details.append(info['partner'])
+        if info['note']: details.append(info['note'])
         
-        if found_any:
-            reply_contents.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ?"))
-
-        line_bot_api.reply_message(event.reply_token, reply_contents)
+        detail_str = f" ({' '.join(details)})" if details else ""
+        
+        reply_text = f"มีรับกลับของ {info['hospital']}{detail_str}"
+        
+        line_bot_api.reply_message(
+            event.reply_token,
+            [TextSendMessage(text=reply_text), 
+             TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
+        )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
