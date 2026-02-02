@@ -43,11 +43,8 @@ def is_allowed_color(color_hex):
 
     r, g, b = rgb
 
-    # 🔵 ฟ้า / ฟ้าเขียว
-    is_blue = (
-        (b >= 200 and g >= 200 and r <= 120) or
-        (b >= 200 and g <= 200 and r <= 150)
-    )
+    # 🔵 ฟ้า / cyan (#00FFFF)
+    is_blue = (r <= 120 and g >= 200 and b >= 200)
 
     # 🟡 เหลือง
     is_yellow = (r >= 200 and g >= 200 and b <= 150)
@@ -72,23 +69,25 @@ def update_sheet():
 def has_round_for_district(district_name):
     district_name = district_name.lower().strip()
 
-    # คอลัมน์จริงจากชีท
-    K_COL = 10  # HOSPITAL
-    O_COL = 14  # พันธมิตร
-    P_COL = 15  # หมายเหตุ
+    K_COL = 10  # hospital
+    O_COL = 14  # partner
+    P_COL = 15  # note
 
     if not isinstance(latest_sheet_data, dict):
         return None
 
-    for row_idx, cells in latest_sheet_data.items():
+    found_hospital = False
+
+    # 🔑 เรียงแถวตามเลขจริง
+    for row_idx in sorted(latest_sheet_data.keys(), key=int):
 
         if str(row_idx) == "1":
             continue
 
+        cells = latest_sheet_data[row_idx]
         if not isinstance(cells, list) or len(cells) <= K_COL:
             continue
 
-        # ===== HOSPITAL =====
         hospital_cell = cells[K_COL] or {}
         hospital_text = str(hospital_cell.get("value", "")).strip()
         hospital_lower = hospital_text.lower()
@@ -96,33 +95,29 @@ def has_round_for_district(district_name):
         if district_name not in hospital_lower:
             continue
 
-        # ===== เช็คสี K / O / P =====
+        found_hospital = True
+
+        # เช็คสี K / O / P
         color_cells = []
         for col in (K_COL, O_COL, P_COL):
             if len(cells) > col and isinstance(cells[col], dict):
                 color_cells.append(cells[col])
 
-        if not any(
+        if any(
             is_allowed_color((c.get("color") or "").lower())
             for c in color_cells
         ):
-            continue
+            partner = str((cells[O_COL] or {}).get("value", "")).strip()
+            note = str((cells[P_COL] or {}).get("value", "")).strip()
 
-        # ===== ดึงข้อความ =====
-        partner_text = ""
-        note_text = ""
+            return {
+                "hospital": hospital_text,
+                "partner": partner,
+                "note": note
+            }
 
-        if len(cells) > O_COL:
-            partner_text = str((cells[O_COL] or {}).get("value", "")).strip()
-
-        if len(cells) > P_COL:
-            note_text = str((cells[P_COL] or {}).get("value", "")).strip()
-
-        return {
-            "hospital": hospital_text,
-            "partner": partner_text,
-            "note": note_text
-        }
+    if found_hospital:
+        return None
 
     return None
 
