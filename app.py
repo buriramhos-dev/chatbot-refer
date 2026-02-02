@@ -416,32 +416,34 @@ def handle_message(event):
         )
         return
 
-    # ตรวจสอบว่าข้อมูลหมดอายุหรือไม่ (อ่านค่าภายใต้ lock เพื่อความสเถียร)
-    import time
-    current_time = time.time()
-    with data_lock:
-        snapshot_last = last_sheet_fetch_time
-        snapshot_data = latest_sheet_data
-
-    is_data_expired = (
-        snapshot_last is None or 
-        (current_time - snapshot_last) > SHEET_CACHE_TIMEOUT
-    )
-
-    # ถ้าไม่มีข้อมูล หรือข้อมูลหมดอายุ ให้ดึงข้อมูลใหม่
-    if not snapshot_data or not isinstance(snapshot_data, dict) or is_data_expired:
-        print(f"⚠️ Refreshing sheet data (expired: {is_data_expired})...")
+    # ตรวจสอบและดึงข้อมูล (รีไตร 3 ครั้ง ถ้าไม่เจอข้อมูล)
+    max_retries = 3
+    result_found = False
+    
+    for attempt in range(max_retries):
+        # ดึงข้อมูลใหม่
+        print(f"🔄 Attempt {attempt + 1}/{max_retries}: Fetching sheet data...")
         fetch_sheet_data()
         
-        # ถ้ายังไม่มีข้อมูลหลังดึง ให้ตอบ "กำลังซิงค์"
+        # ตรวจสอบว่าได้ข้อมูลหรือไม่
         with data_lock:
             snapshot_data = latest_sheet_data
-        if not snapshot_data or not isinstance(snapshot_data, dict):
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
-            )
-            return
+        
+        if snapshot_data and isinstance(snapshot_data, dict):
+            print(f"✅ Got data: {len(snapshot_data)} rows")
+            result_found = True
+            break
+        else:
+            print(f"⚠️ No data yet, retrying...")
+            if attempt < max_retries - 1:
+                time.sleep(0.5)  # รอ 0.5 วินาที ก่อนลอง fetch ใหม่
+    
+    if not result_found:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
+        )
+        return
 
     replies = []
     follow = False
