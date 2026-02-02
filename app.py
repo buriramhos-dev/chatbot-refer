@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv
 import requests
 import threading
+import time
 
 load_dotenv()
 app = Flask(__name__)
@@ -28,6 +29,8 @@ BURIRAM_DISTRICTS = [
 
 latest_sheet_data = None
 sheet_ready = False
+last_sheet_fetch_time = None
+SHEET_CACHE_TIMEOUT = 5 * 60  # Refresh ทุก 5 นาที
 
 # ================== COLOR ==================
 def hex_to_rgb(hex_color):
@@ -147,7 +150,7 @@ def is_allowed_color(color_data):
 # ================== UPDATE ==================
 @app.route("/update", methods=["POST"])
 def update_sheet():
-    global latest_sheet_data, sheet_ready
+    global latest_sheet_data, sheet_ready, last_sheet_fetch_time
     data = request.json
 
     if not data or "full_sheet_data" not in data:
@@ -155,6 +158,7 @@ def update_sheet():
 
     latest_sheet_data = data["full_sheet_data"]
     sheet_ready = True
+    last_sheet_fetch_time = time.time()  # บันทึกเวลาอัปเดต
     print("✅ Sheet synced")
     # Debug: นับจำนวนแถว
     if isinstance(latest_sheet_data, dict):
@@ -349,6 +353,8 @@ def callback():
 # ================== MESSAGE ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
+    global last_sheet_fetch_time
+    
     text = event.message.text.lower()
     districts = [d for d in BURIRAM_DISTRICTS if d.lower() in text]
 
@@ -359,9 +365,17 @@ def handle_message(event):
         )
         return
 
-    # ถ้ายังไม่มีข้อมูล ให้ดึงข้อมูลใหม่ทันที
-    if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
-        print(f"⚠️ No sheet data, fetching now...")
+    # ตรวจสอบว่าข้อมูลหมดอายุหรือไม่
+    import time
+    current_time = time.time()
+    is_data_expired = (
+        last_sheet_fetch_time is None or 
+        (current_time - last_sheet_fetch_time) > SHEET_CACHE_TIMEOUT
+    )
+    
+    # ถ้าไม่มีข้อมูล หรือข้อมูลหมดอายุ ให้ดึงข้อมูลใหม่
+    if not latest_sheet_data or not isinstance(latest_sheet_data, dict) or is_data_expired:
+        print(f"⚠️ Refreshing sheet data (expired: {is_data_expired})...")
         fetch_sheet_data()
         
         # ถ้ายังไม่มีข้อมูลหลังดึง ให้ตอบ "กำลังซิงค์"
@@ -407,8 +421,9 @@ def handle_message(event):
 # ================== RUN ==================
 def fetch_sheet_data():
     """ดึงข้อมูล Google Sheets อัตโนมัติ"""
-    global latest_sheet_data, sheet_ready
+    global latest_sheet_data, sheet_ready, last_sheet_fetch_time
     
+    import time
     google_apps_script_url = os.getenv("GOOGLE_APPS_SCRIPT_URL")
     if not google_apps_script_url:
         print("❌ GOOGLE_APPS_SCRIPT_URL not found in environment variables")
@@ -423,6 +438,7 @@ def fetch_sheet_data():
         if data and "full_sheet_data" in data:
             latest_sheet_data = data["full_sheet_data"]
             sheet_ready = True
+            last_sheet_fetch_time = time.time()  # บันทึกเวลาดึง
             print("✅ Sheet data loaded successfully on startup")
             print(f"📊 Total rows: {len(latest_sheet_data)}")
         else:
