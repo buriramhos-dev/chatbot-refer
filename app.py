@@ -131,9 +131,6 @@ def is_allowed_color(color_data):
 
     r, g, b = rgb
     
-    # Debug: แสดง RGB เพื่อตรวจสอบ
-    print(f"   🎨 Checking RGB({r}, {g}, {b})")
-    
     # สีฟ้า (Cyan): #00ffff = (0, 255, 255) - B สูง, G สูง, R ต่ำ
     is_blue = (b >= 200 and g >= 200 and r <= 100)
     
@@ -141,7 +138,8 @@ def is_allowed_color(color_data):
     is_yellow = (r >= 200 and g >= 200 and b <= 50)
     
     # Debug: แสดง RGB และผลการตรวจสอบ
-    print(f"   ✓ RGB({r}, {g}, {b}) | Blue: {is_blue} | Yellow: {is_yellow}")
+    if is_blue or is_yellow:
+        print(f"   ✓ Found valid color! RGB({r}, {g}, {b}) | Blue: {is_blue} | Yellow: {is_yellow}")
     
     # เฉพาะสีฟ้า + สีเหลือง = "มี"
     return is_blue or is_yellow
