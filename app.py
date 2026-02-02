@@ -43,11 +43,8 @@ def is_allowed_color(color_hex):
 
     r, g, b = rgb
 
-    # 🔵 ฟ้า / ฟ้าเขียว (cyan #00FFFF)
-    is_blue = (
-        (b >= 200 and g >= 200 and r <= 100) or   # cyan
-        (b >= 200 and g <= 200 and r <= 150)      # blue
-    )
+    # 🔵 ฟ้า / cyan (#00FFFF)
+    is_blue = (r <= 100 and g >= 200 and b >= 200)
 
     # 🟡 เหลือง
     is_yellow = (r >= 200 and g >= 200 and b <= 150)
@@ -72,42 +69,58 @@ def update_sheet():
 def has_round_for_district(district_name):
     district_name = district_name.lower().strip()
 
-    DISTRICT_COL = 10   # K
-    PARTNER_COL  = 16   # Q
-    NOTE_COL     = 17   # R
+    # ✅ ใช้คอลัมน์จริงจากชีท
+    K_COL = 10  # HOSPITAL
+    O_COL = 14  # พันธมิตร
+    P_COL = 15  # หมายเหตุ
 
     if not isinstance(latest_sheet_data, dict):
         return None
 
     for row_idx, cells in latest_sheet_data.items():
+
         if str(row_idx) == "1":
             continue
 
-        if not isinstance(cells, list) or len(cells) <= NOTE_COL:
+        if not isinstance(cells, list):
             continue
 
-        district_cell = cells[DISTRICT_COL] or {}
-        district_value = str(district_cell.get("value", "")).lower()
-
-        if district_name not in district_value:
+        if len(cells) <= K_COL:
             continue
 
-        color_cells = [
-            cells[DISTRICT_COL],
-            cells[PARTNER_COL],
-            cells[NOTE_COL]
-        ]
+        # ===== HOSPITAL =====
+        hospital_cell = cells[K_COL] or {}
+        hospital_value = str(hospital_cell.get("value", "")).lower()
+
+        if district_name not in hospital_value:
+            continue
+
+        # ===== เช็คสี K / O / P =====
+        color_cells = []
+        for col in (K_COL, O_COL, P_COL):
+            if len(cells) > col and isinstance(cells[col], dict):
+                color_cells.append(cells[col])
 
         if not any(
             is_allowed_color((c.get("color") or "").lower())
-            for c in color_cells if isinstance(c, dict)
+            for c in color_cells
         ):
             continue
 
+        # ===== ดึงข้อความ =====
+        partner_text = ""
+        note_text = ""
+
+        if len(cells) > O_COL:
+            partner_text = str((cells[O_COL] or {}).get("value", "")).strip()
+
+        if len(cells) > P_COL:
+            note_text = str((cells[P_COL] or {}).get("value", "")).strip()
+
         return {
-            "hospital": district_value,
-            "partner": str((cells[PARTNER_COL] or {}).get("value", "")).strip(),
-            "note": str((cells[NOTE_COL] or {}).get("value", "")).strip()
+            "hospital": hospital_value,
+            "partner": partner_text,
+            "note": note_text
         }
 
     return None
@@ -152,9 +165,9 @@ def handle_message(event):
             follow = True
             msg = f"มีรอบรับกลับ {d}"
             if result["partner"]:
-                msg += f" ({result['partner']})"
+                msg += f"\nพันธมิตร: {result['partner']}"
             if result["note"]:
-                msg += f" ({result['note']})"
+                msg += f"\nหมายเหตุ: {result['note']}"
         else:
             msg = f"ไม่มีรอบรับกลับ {d}"
         replies.append(msg)
