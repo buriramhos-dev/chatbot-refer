@@ -396,6 +396,11 @@ def callback():
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
+    except Exception as e:
+        # จับข้อผิดพลาดทุกชนิดในการประมวลผล webhook เพื่อไม่ให้แอพล่ม
+        print(f"❌ Error handling webhook: {e}")
+        traceback.print_exc()
+        return "OK", 500
     return "OK"
 
 # ================== MESSAGE ==================
@@ -404,8 +409,18 @@ def handle_message(event):
     text = event.message.text.lower()
     districts = [d for d in BURIRAM_DISTRICTS if d.lower() in text]
 
+    # helper: safe reply to avoid crashing if LINE API fails
+    def safe_reply(reply_token, messages):
+        try:
+            line_bot_api.reply_message(reply_token, messages)
+            return True
+        except Exception as e:
+            print(f"❌ Failed to send reply: {e}")
+            traceback.print_exc()
+            return False
+
     if not districts:
-        line_bot_api.reply_message(
+        safe_reply(
             event.reply_token,
             TextSendMessage(text="❌ กรุณาระบุโรงพยาบาลในบุรีรัมย์")
         )
@@ -435,7 +450,7 @@ def handle_message(event):
         
         # ถ้าเก็บได้ ให้ทำต่อได้เลย
         if not latest_sheet_data or not isinstance(latest_sheet_data, dict):
-            line_bot_api.reply_message(
+            safe_reply(
                 event.reply_token,
                 TextSendMessage(text="⏳ กำลังซิงค์ข้อมูลจากชีทค่ะ กรุณารอสักครู่แล้วลองใหม่")
             )
@@ -471,7 +486,7 @@ def handle_message(event):
     if follow:
         messages.append(TextSendMessage(text="ล้อหมุนกี่โมงคะ"))
 
-    line_bot_api.reply_message(event.reply_token, messages)
+    safe_reply(event.reply_token, messages)
 
 # ================== RUN ==================
 def fetch_sheet_data():
