@@ -28,22 +28,6 @@ lock = threading.Lock()
 def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-def is_allowed_color(color):
-    if not color:
-        return False
-
-    c = color.replace("#", "").lower()
-
-    yellow = {
-        "ffff00", "fff2cc", "ffe599",
-        "fff100", "f1c232", "fbef24"
-    }
-    blue = {
-        "00ffff", "c9daf8", "a4c2f4",
-        "cfe2f3", "d0e0e3", "a2c4c9"
-    }
-    return c in yellow or c in blue
-
 # ================= API =================
 @app.route("/update", methods=["POST"])
 def update():
@@ -77,8 +61,6 @@ def find_hospital(hospital_name):
         rows = list(latest_rows)
 
     found_name = False
-
-    # ไล่จากบนลงล่าง (row_no น้อยก่อน)
     rows.sort(key=lambda r: r.get("row_no", 0))
 
     for row in rows:
@@ -87,7 +69,8 @@ def find_hospital(hospital_name):
 
         found_name = True
 
-        if not is_allowed_color(row.get("row_color")):
+        # ✅ ใช้ flag จาก Apps Script
+        if not row.get("has_accept", False):
             continue
 
         return {
@@ -97,7 +80,7 @@ def find_hospital(hospital_name):
         }
 
     if found_name:
-        return "NO_COLOR"
+        return "NO_ACCEPT"
 
     return None
 
@@ -132,7 +115,6 @@ def handle(event):
                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")
             ]
         )
-
     else:
         line_bot_api.reply_message(
             event.reply_token,
