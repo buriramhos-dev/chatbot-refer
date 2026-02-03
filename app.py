@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 import threading
 
+# ================== INIT ==================
 load_dotenv()
 app = Flask(__name__)
 
@@ -14,14 +15,14 @@ handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
 # ================== DISTRICT CONFIG ==================
 BURIRAM_DISTRICTS = [
-    "เมืองบุรีรัมย์","คูเมือง","กระสัง","นางรอง","หนองกี่","ละหานทราย",
-    "ประโคนชัย","บ้านกรวด","พุทไธสง","ลำปลายมาศ","สตึก","บ้านด่าน",
-    "ห้วยราช","โนนสุวรรณ","ปะคำ","นาโพธิ์","หนองหงส์","พลับพลาชัย",
-    "เฉลิมพระเกียรติ","ชำนิ","บ้านใหม่ไชยพจน์","โนนดินแดง","แคนดง",
-    "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
+    "เมืองบุรีรัมย์", "คูเมือง", "กระสัง", "นางรอง", "หนองกี่", "ละหานทราย",
+    "ประโคนชัย", "บ้านกรวด", "พุทไธสง", "ลำปลายมาศ", "สตึก", "บ้านด่าน",
+    "ห้วยราช", "โนนสุวรรณ", "ปะคำ", "นาโพธิ์", "หนองหงส์", "พลับพลาชัย",
+    "เฉลิมพระเกียรติ", "ชำนิ", "บ้านใหม่ไชยพจน์", "โนนดินแดง", "แคนดง",
+    "ลำทะเมนชัย", "เมืองยาง", "ชุมพวง"
 ]
 
-latest_sheet_data = []   # ✅ เปลี่ยนเป็น list
+latest_sheet_data = []   # เก็บ rows จาก Google Sheet
 sheet_ready = False
 data_lock = threading.Lock()
 
@@ -42,7 +43,8 @@ def is_allowed_color(color_hex):
     }
 
     blue = {
-        "00ffff", "c9daf8", "a4c2f4",
+        "00ffff",  # ฟ้าชัด
+        "c9daf8", "a4c2f4",
         "cfe2f3", "d0e0e3", "a2c4c9"
     }
 
@@ -54,7 +56,6 @@ def update_sheet():
     global latest_sheet_data, sheet_ready
     data = request.json
 
-    # ✅ รับ rows จาก GAS ตรง ๆ
     if not data or "rows" not in data:
         return "Invalid payload", 400
 
@@ -68,13 +69,15 @@ def update_sheet():
 def callback():
     signature = request.headers.get("X-Line-Signature")
     body = request.get_data(as_text=True)
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
+
     return "OK"
 
-# ================== SEARCH CORE (FINAL LOGIC A) ==================
+# ================== SEARCH CORE ==================
 def get_district_info(district_name):
     target = clean_text(district_name)
 
@@ -86,7 +89,7 @@ def get_district_info(district_name):
 
     found_name = False
 
-    # ✅ ไล่จากบน → ล่าง ตามลำดับชีท
+    # ไล่จากบน → ล่าง ตามลำดับในชีท
     for row in rows:
         hospital = clean_text(row.get("hospital"))
 
@@ -94,14 +97,13 @@ def get_district_info(district_name):
             continue
 
         found_name = True
-
         color = row.get("row_color")
 
         # สีไม่ผ่าน → ข้าม แต่ยังหาต่อ
         if not is_allowed_color(color):
             continue
 
-        # ✅ เจอแถวแรกที่ชื่อถูก + สีผ่าน
+        # เจอแถวแรกที่ชื่อถูก + สีผ่าน
         return {
             "status": "success",
             "data": {
@@ -136,6 +138,7 @@ def handle_message(event):
 
     info = get_district_info(matched_district)
 
+    # ===== มีรับกลับ =====
     if info and info["status"] == "success":
         res = info["data"]
 
@@ -156,6 +159,7 @@ def handle_message(event):
             ]
         )
 
+    # ===== ไม่มีรับกลับ (ชื่อเจอ แต่สีไม่ผ่าน) =====
     elif info and info["status"] == "no_color_match":
         line_bot_api.reply_message(
             event.reply_token,
