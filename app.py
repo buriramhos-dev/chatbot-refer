@@ -25,18 +25,14 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== STRICT COLOR LOGIC (เพิ่มสีเขียวสะท้อนแสงตามภาพ) ==================
+# ================== STRICT COLOR LOGIC ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
     c = color_hex.replace("#", "").lower().strip()
     
-    # ✅ รวมสีเหลืองทุกเฉด
+    # ✅ รวมสีเหลือง ฟ้า และเขียวสะท้อนแสงตามภาพ
     yellow_shades = ["ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599"]
-    
-    # ✅ รวมสีฟ้าทุกเฉด
     blue_shades = ["00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3", "a2c4c9"]
-    
-    # ✅ เพิ่มสีเขียวสะท้อนแสง (Neon Green) ตามที่เห็นในภาพล่าสุด
     green_shades = ["00ff00", "b7e1cd", "d9ead3"]
 
     return (c in yellow_shades) or (c in blue_shades) or (c in green_shades)
@@ -54,7 +50,6 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# !!! ส่วนที่ขาดไปทำให้บอทไม่ตอบเลย !!!
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature")
@@ -65,9 +60,13 @@ def callback():
         abort(400)
     return "OK"
 
-# ================== SEARCH CORE ==================
+# ================== SEARCH CORE (แก้ไขการดึงคอลัมน์ O และ P) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
+    HOSP_COL = 10  # คอลัมน์ K (HOSPITAL)
+    PART_COL = 14  # คอลัมน์ O (พันธมิตร)
+    NOTE_COL = 15  # คอลัมน์ P (หมายเหตุ)
+
     with data_lock:
         working_data = latest_sheet_data.copy()
     if not working_data: return None
@@ -81,27 +80,35 @@ def get_district_info(district_name):
     for row_idx in sorted_keys:
         if str(row_idx) == "1": continue 
         cells = working_data[row_idx]
-        if not isinstance(cells, list) or len(cells) <= 15: continue
+        
+        # ตรวจสอบว่าข้อมูลมีถึงคอลัมน์ P หรือไม่
+        if not isinstance(cells, list) or len(cells) <= NOTE_COL: continue
 
-        h_cell = cells[10] # HOSPITAL
+        h_cell = cells[HOSP_COL]
         h_val = str(h_cell.get("value", "") or "").strip()
         h_color = h_cell.get("color")
 
         if target == h_val:
             found_any_name = True
             if is_allowed_color(h_color):
-                partner = str(cells[14].get("value", "") or "").strip()
-                note = str(cells[15].get("value", "") or "").strip()
+                # ดึงข้อมูลจากคอลัมน์ O และ P
+                partner = str(cells[PART_COL].get("value", "") or "").strip()
+                note = str(cells[NOTE_COL].get("value", "") or "").strip()
+                
                 return {
                     "status": "success", 
-                    "data": {"hospital": h_val, "partner": partner, "note": note}
+                    "data": {
+                        "hospital": h_val, 
+                        "partner": partner, 
+                        "note": note
+                    }
                 }
     
     if found_any_name:
         return {"status": "no_color_match", "hospital": target}
     return None
 
-# ================== MESSAGE HANDLER ==================
+# ================== MESSAGE HANDLER (ปรับการตอบกลับพร้อมหมายเหตุ) ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     if not sheet_ready: return
@@ -113,13 +120,20 @@ def handle_message(event):
     if info:
         if info["status"] == "success":
             res = info["data"]
-            details = [res['partner'], res['note']]
-            detail_str = f" ({' '.join(filter(None, details))})" if any(details) else ""
+            
+            # รวบรวมข้อมูลจาก O (พันธมิตร) และ P (หมายเหตุ)
+            extra_info = []
+            if res['partner']: extra_info.append(res['partner'])
+            if res['note']: extra_info.append(res['note'])
+            
+            # จัดรูปแบบข้อความในวงเล็บ
+            detail_str = f" ({' '.join(extra_info)})" if extra_info else ""
             reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
             
             line_bot_api.reply_message(
                 event.reply_token,
-                [TextSendMessage(text=reply_text), TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
+                [TextSendMessage(text=reply_text), 
+                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
             )
         elif info["status"] == "no_color_match":
             line_bot_api.reply_message(
