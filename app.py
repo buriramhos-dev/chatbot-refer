@@ -23,43 +23,30 @@ latest_sheet_data = {}
 sheet_ready = False
 lock = threading.Lock()
 
-# ---------- UTILS ----------
 def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-def is_allowed_color(hex_color):
-    if not hex_color:
+def is_allowed_color(color):
+    if not color:
         return False
-
-    c = hex_color.replace("#", "").lower()
-
-    yellow = {
-        "ffff00", "fff2cc", "ffe599", "fff100", "f1c232"
-    }
-    blue = {
-        "00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3"
-    }
+    c = color.replace("#", "").lower()
+    yellow = {"ffff00","fff2cc","ffe599","fff100","f1c232","fbef24"}
+    blue = {"00ffff","c9daf8","a4c2f4","cfe2f3","d0e0e3","a2c4c9"}
     return c in yellow or c in blue
 
 def row_has_allowed_color(cells):
     for cell in cells:
-        if isinstance(cell, dict):
-            if is_allowed_color(cell.get("bg")):
-                return True
+        if is_allowed_color(cell.get("color")):
+            return True
     return False
 
-# ---------- API ----------
 @app.route("/update", methods=["POST"])
-def update_sheet():
+def update():
     global latest_sheet_data, sheet_ready
     data = request.json
-    if not data or "full_sheet_data" not in data:
-        return "Invalid payload", 400
-
     with lock:
-        latest_sheet_data = data["full_sheet_data"]
+        latest_sheet_data = data.get("full_sheet_data", {})
         sheet_ready = True
-
     return "OK"
 
 @app.route("/callback", methods=["POST"])
@@ -72,92 +59,59 @@ def callback():
         abort(400)
     return "OK"
 
-# ---------- CORE LOGIC ----------
-def get_district_info(name):
+def find_hospital(name):
     target = clean(name)
-
-    HOSP_COL = 10
-    PART_COL = 14
-    NOTE_COL = 15
 
     with lock:
         data = latest_sheet_data.copy()
 
-    rows = sorted(data.keys(), key=lambda x: int(x))
-
-    found_name = False
-
-    for r in rows:
-        cells = data[r]
-        if len(cells) <= NOTE_COL:
+    for row in sorted(data.keys(), key=lambda x: int(x)):
+        cells = data[row]
+        if clean(cells[10]["value"]) != target:
             continue
 
-        hosp = clean(cells[HOSP_COL].get("value"))
+        # ⭐ หัวใจของระบบ
+        if not row_has_allowed_color(cells):
+            continue
 
-        if hosp == target:
-            found_name = True
+        partner = str(cells[14]["value"] or "").strip()
+        note = str(cells[15]["value"] or "").strip()
 
-            # ❌ ข้ามแถวที่ไม่ใช่ฟ้า/เหลือง
-            if not row_has_allowed_color(cells):
-                continue
-
-            partner = str(cells[PART_COL].get("value") or "").strip()
-            note = str(cells[NOTE_COL].get("value") or "").strip()
-
-            return {
-                "status": "success",
-                "hospital": name,
-                "partner": partner,
-                "note": note
-            }
-
-    if found_name:
-        return {"status": "no_color", "hospital": name}
+        return partner, note
 
     return None
 
-# ---------- LINE HANDLER ----------
 @handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
+def handle(event):
     if not sheet_ready:
         return
 
     text = clean(event.message.text)
-
-    district = next(
-        (d for d in BURIRAM_DISTRICTS if clean(d) in text),
-        None
-    )
-
-    if not district:
+    hospital = next((h for h in BURIRAM_DISTRICTS if clean(h) in text), None)
+    if not hospital:
         return
 
-    info = get_district_info(district)
+    result = find_hospital(hospital)
 
-    if info and info["status"] == "success":
-        parts = []
-        if info["partner"]:
-            parts.append(info["partner"])
-        if info["note"]:
-            parts.append(info["note"])
-
-        detail = f" ({' '.join(parts)})" if parts else ""
-        reply = f"มีรับกลับของ {info['hospital']}{detail}"
+    if result:
+        partner, note = result
+        extra = " ".join(p for p in [partner, note] if p)
+        msg = f"มีรับกลับของ {hospital}"
+        if extra:
+            msg += f" ({extra})"
 
         line_bot_api.reply_message(
             event.reply_token,
             [
-                TextSendMessage(text=reply),
+                TextSendMessage(text=msg),
                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")
             ]
         )
-
     else:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=f"ไม่มีรับกลับของ {district}")
+            TextSendMessage(text=f"ไม่มีรับกลับของ {hospital}")
         )
 
-# ---------- RUN ----------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
