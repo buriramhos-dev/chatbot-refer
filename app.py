@@ -15,14 +15,14 @@ handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
 # ================== DISTRICT CONFIG ==================
 BURIRAM_DISTRICTS = [
-    "เมืองบุรีรัมย์", "คูเมือง", "กระสัง", "นางรอง", "หนองกี่", "ละหานทราย",
-    "ประโคนชัย", "บ้านกรวด", "พุทไธสง", "ลำปลายมาศ", "สตึก", "บ้านด่าน",
-    "ห้วยราช", "โนนสุวรรณ", "ปะคำ", "นาโพธิ์", "หนองหงส์", "พลับพลาชัย",
-    "เฉลิมพระเกียรติ", "ชำนิ", "บ้านใหม่ไชยพจน์", "โนนดินแดง", "แคนดง",
-    "ลำทะเมนชัย", "เมืองยาง", "ชุมพวง"
+    "เมืองบุรีรัมย์","คูเมือง","กระสัง","นางรอง","หนองกี่","ละหานทราย",
+    "ประโคนชัย","บ้านกรวด","พุทไธสง","ลำปลายมาศ","สตึก","บ้านด่าน",
+    "ห้วยราช","โนนสุวรรณ","ปะคำ","นาโพธิ์","หนองหงส์","พลับพลาชัย",
+    "เฉลิมพระเกียรติ","ชำนิ","บ้านใหม่ไชยพจน์","โนนดินแดง","แคนดง",
+    "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
-latest_sheet_data = []   # เก็บ rows จาก Google Sheet
+latest_sheet_data = []     # rows จาก Google Sheet
 sheet_ready = False
 data_lock = threading.Lock()
 
@@ -30,7 +30,7 @@ data_lock = threading.Lock()
 def clean_text(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-# ================== COLOR LOGIC (เหลือง + ฟ้า เท่านั้น) ==================
+# ================== COLOR LOGIC ==================
 def is_allowed_color(color_hex):
     if not color_hex:
         return False
@@ -43,7 +43,7 @@ def is_allowed_color(color_hex):
     }
 
     blue = {
-        "00ffff",  # ฟ้าชัด
+        "00ffff",        # ฟ้าชัด
         "c9daf8", "a4c2f4",
         "cfe2f3", "d0e0e3", "a2c4c9"
     }
@@ -77,7 +77,7 @@ def callback():
 
     return "OK"
 
-# ================== SEARCH CORE ==================
+# ================== SEARCH CORE (FIXED) ==================
 def get_district_info(district_name):
     target = clean_text(district_name)
 
@@ -89,11 +89,13 @@ def get_district_info(district_name):
 
     found_name = False
 
-    # ไล่จากบน → ล่าง ตามลำดับในชีท
+    # ✅ ไล่จากบน → ล่าง ตามลำดับชีท
     for row in rows:
-        hospital = clean_text(row.get("hospital"))
+        hospital_raw = row.get("hospital")
+        hospital = clean_text(hospital_raw)
 
-        if hospital != target:
+        # ✅ FIX ใหญ่ที่สุด (ไม่ต้องตรงเป๊ะ)
+        if target not in hospital:
             continue
 
         found_name = True
@@ -103,7 +105,7 @@ def get_district_info(district_name):
         if not is_allowed_color(color):
             continue
 
-        # เจอแถวแรกที่ชื่อถูก + สีผ่าน
+        # ✅ เจอชื่อ + สีผ่าน
         return {
             "status": "success",
             "data": {
@@ -113,7 +115,7 @@ def get_district_info(district_name):
             }
         }
 
-    # เจอชื่อ แต่ไม่มีแถวไหนสีผ่าน
+    # เจอชื่อ แต่ไม่มีสีผ่าน
     if found_name:
         return {"status": "no_color_match", "hospital": district_name}
 
@@ -148,8 +150,8 @@ def handle_message(event):
         if res["note"] and res["note"].lower() != "none":
             display_parts.append(res["note"])
 
-        detail_str = f" ({' '.join(display_parts)})" if display_parts else ""
-        reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
+        detail = f" ({' '.join(display_parts)})" if display_parts else ""
+        reply_text = f"มีรับกลับของ {res['hospital']}{detail}"
 
         line_bot_api.reply_message(
             event.reply_token,
@@ -159,7 +161,7 @@ def handle_message(event):
             ]
         )
 
-    # ===== ไม่มีรับกลับ (ชื่อเจอ แต่สีไม่ผ่าน) =====
+    # ===== ไม่มีรับกลับ =====
     elif info and info["status"] == "no_color_match":
         line_bot_api.reply_message(
             event.reply_token,
