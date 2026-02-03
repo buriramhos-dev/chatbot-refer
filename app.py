@@ -2,9 +2,8 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os
+import os, threading
 from dotenv import load_dotenv
-import threading
 
 load_dotenv()
 app = Flask(__name__)
@@ -12,7 +11,6 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
-# ================== DISTRICT CONFIG ==================
 BURIRAM_DISTRICTS = [
     "เมืองบุรีรัมย์","คูเมือง","กระสัง","นางรอง","หนองกี่","ละหานทราย",
     "ประโคนชัย","บ้านกรวด","พุทไธสง","ลำปลายมาศ","สตึก","บ้านด่าน",
@@ -23,40 +21,34 @@ BURIRAM_DISTRICTS = [
 
 latest_sheet_data = {}
 sheet_ready = False
-data_lock = threading.Lock()
+lock = threading.Lock()
 
-# ================== UTILS ==================
-def clean_text(txt):
+# ---------- UTILS ----------
+def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-# ================== COLOR LOGIC ==================
-def is_allowed_color(color_hex):
-    if not color_hex:
+def is_allowed_color(hex_color):
+    if not hex_color:
         return False
 
-    c = color_hex.replace("#", "").lower().strip()
+    c = hex_color.replace("#", "").lower()
 
     yellow = {
-        "ffff00", "fff2cc", "ffe599",
-        "fff100", "f1c232", "fbef24"
+        "ffff00", "fff2cc", "ffe599", "fff100", "f1c232"
     }
-
     blue = {
-        "00ffff", "c9daf8", "a4c2f4",
-        "cfe2f3", "d0e0e3", "a2c4c9"
+        "00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3"
     }
-
     return c in yellow or c in blue
 
 def row_has_allowed_color(cells):
-    """เช็คว่าทั้งแถวมีสีฟ้าหรือเหลืองหรือไม่"""
     for cell in cells:
         if isinstance(cell, dict):
-            if is_allowed_color(cell.get("color")):
+            if is_allowed_color(cell.get("bg")):
                 return True
     return False
 
-# ================== API ENDPOINT ==================
+# ---------- API ----------
 @app.route("/update", methods=["POST"])
 def update_sheet():
     global latest_sheet_data, sheet_ready
@@ -64,11 +56,11 @@ def update_sheet():
     if not data or "full_sheet_data" not in data:
         return "Invalid payload", 400
 
-    with data_lock:
+    with lock:
         latest_sheet_data = data["full_sheet_data"]
         sheet_ready = True
 
-    return "OK", 200
+    return "OK"
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -80,41 +72,32 @@ def callback():
         abort(400)
     return "OK"
 
-# ================== SEARCH CORE ==================
-def get_district_info(district_name):
-    target = clean_text(district_name)
+# ---------- CORE LOGIC ----------
+def get_district_info(name):
+    target = clean(name)
 
-    HOSP_COL = 10  # K
-    PART_COL = 14  # O
-    NOTE_COL = 15  # P
+    HOSP_COL = 10
+    PART_COL = 14
+    NOTE_COL = 15
 
-    with data_lock:
+    with lock:
         data = latest_sheet_data.copy()
 
-    if not data:
-        return None
-
-    try:
-        row_keys = sorted(data.keys(), key=lambda x: int(x))
-    except:
-        row_keys = sorted(data.keys())
+    rows = sorted(data.keys(), key=lambda x: int(x))
 
     found_name = False
 
-    for row in row_keys:
-        if str(row) == "1":
+    for r in rows:
+        cells = data[r]
+        if len(cells) <= NOTE_COL:
             continue
 
-        cells = data.get(row)
-        if not isinstance(cells, list) or len(cells) <= NOTE_COL:
-            continue
+        hosp = clean(cells[HOSP_COL].get("value"))
 
-        h_name = clean_text(cells[HOSP_COL].get("value"))
-
-        if h_name == target:
+        if hosp == target:
             found_name = True
 
-            # ✅ เช็คสีทั้งแถว
+            # ❌ ข้ามแถวที่ไม่ใช่ฟ้า/เหลือง
             if not row_has_allowed_color(cells):
                 continue
 
@@ -123,47 +106,43 @@ def get_district_info(district_name):
 
             return {
                 "status": "success",
-                "data": {
-                    "hospital": district_name,
-                    "partner": partner,
-                    "note": note
-                }
+                "hospital": name,
+                "partner": partner,
+                "note": note
             }
 
     if found_name:
-        return {"status": "no_color_match", "hospital": district_name}
+        return {"status": "no_color", "hospital": name}
 
     return None
 
-# ================== MESSAGE HANDLER ==================
+# ---------- LINE HANDLER ----------
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     if not sheet_ready:
         return
 
-    raw = clean_text(event.message.text)
+    text = clean(event.message.text)
 
-    matched = next(
-        (d for d in BURIRAM_DISTRICTS if clean_text(d) in raw),
+    district = next(
+        (d for d in BURIRAM_DISTRICTS if clean(d) in text),
         None
     )
 
-    if not matched:
+    if not district:
         return
 
-    info = get_district_info(matched)
+    info = get_district_info(district)
 
     if info and info["status"] == "success":
-        res = info["data"]
-
         parts = []
-        if res["partner"]:
-            parts.append(res["partner"])
-        if res["note"]:
-            parts.append(res["note"])
+        if info["partner"]:
+            parts.append(info["partner"])
+        if info["note"]:
+            parts.append(info["note"])
 
         detail = f" ({' '.join(parts)})" if parts else ""
-        reply = f"มีรับกลับของ {res['hospital']}{detail}"
+        reply = f"มีรับกลับของ {info['hospital']}{detail}"
 
         line_bot_api.reply_message(
             event.reply_token,
@@ -173,13 +152,12 @@ def handle_message(event):
             ]
         )
 
-    elif info and info["status"] == "no_color_match":
+    else:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=f"ไม่มีรับกลับของ {info['hospital']}")
+            TextSendMessage(text=f"ไม่มีรับกลับของ {district}")
         )
 
-# ================== RUN ==================
+# ---------- RUN ----------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
