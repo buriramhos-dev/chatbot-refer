@@ -25,43 +25,19 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== COLOR LOGIC (แก้ไขตามค่าจริงจาก Log ของคุณ) ==================
-def hex_to_rgb(hex_color):
-    try:
-        if not hex_color: return None
-        hex_color = hex_color.replace("#", "").strip()
-        if len(hex_color) != 6: return None
-        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    except:
-        return None
-
+# ================== STRICT COLOR LOGIC ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
+    
+    # ล้างค่าเพื่อให้เช็คได้แม่นยำ
     clean_hex = color_hex.replace("#", "").lower().strip()
     
-    # 1. รายการสีที่ยอมรับ (อ้างอิงจาก Log ที่คุณส่งมา)
-    # เราเพิ่ม '00ff00' เพราะใน Log ยืนยันว่าแถวที่มีข้อมูลคือสีนี้
-    allowed_list = [
-        "00ff00",  # ✅ สีเขียว/ฟ้า ที่พบในแถว 117, 171, 188 (หนองกี่)
-        "ffff00",  # สีเหลืองมาตรฐาน
-        "00ffff",  # สีฟ้ามาตรฐาน
-        "00ecec",  # สีฟ้า Cyan อีกโทน
-        "cyan", "yellow"
-    ]
+    # ✅ ยอมรับเฉพาะ 2 สีนี้เท่านั้นตามสั่ง
+    # ffff00 = สีเหลืองมาตรฐาน
+    # 00ffff = สีฟ้ามาตรฐาน (Cyan)
+    allowed_strictly = ["ffff00", "00ffff"]
     
-    if clean_hex in allowed_list:
-        return True
-
-    rgb = hex_to_rgb(clean_hex)
-    if not rgb: return False
-    r, g, b = rgb
-
-    # 2. Logic สำรอง: ตรวจสอบโทนสีสว่าง (เน้น Green สูงสำหรับสีในชีทคุณ)
-    is_yellow = (r > 180 and g > 180 and b < 150)
-    is_cyan_blue = (g > 180 and b > 180 and r < 180)
-    is_bright_green = (g > 200 and r < 100 and b < 100) # สำหรับ #00ff00
-
-    return is_yellow or is_cyan_blue or is_bright_green
+    return clean_hex in allowed_strictly
 
 # ================== API ENDPOINT ==================
 @app.route("/update", methods=["POST"])
@@ -113,7 +89,7 @@ def get_district_info(district_name):
         if target == h_val:
             found_name_match = True 
             
-            # ดูค่าสีจริงใน Console เพื่อปรับแต่งภายหลัง
+            # ดูค่าสีจริงใน Console เพื่อเช็คว่า Google ส่งค่าตรงกับที่เราล็อคไว้ไหม
             print(f"DEBUG: เจอ '{h_val}' ที่แถว {row_idx} ค่าสีคือ '{h_color}'")
             
             if is_allowed_color(h_color):
@@ -172,6 +148,7 @@ def handle_message(event):
                  TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
             )
         elif info["status"] == "no_color_match":
+            # หากชื่อตรงแต่สีไม่ใช่ #ffff00 หรือ #00ffff บอทจะตอบว่าไม่มี
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text=f"ไม่มีรับกลับของ {info['hospital']}")
