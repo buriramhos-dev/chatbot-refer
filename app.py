@@ -25,19 +25,24 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== STRICT COLOR LOGIC (รองรับเฉดสีจากการ Copy) ==================
+# ================== STRICT COLOR LOGIC (เพิ่มเฉดสีให้ครอบคลุมที่สุด) ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
-    # ล้างค่ารหัสสีให้เป็นตัวพิมพ์เล็กเพื่อเปรียบเทียบ
     c = color_hex.replace("#", "").lower().strip()
     
-    # ✅ กลุ่มสีเหลือง (รวมรหัสที่พบบ่อยใน Google Sheets และจากการ Copy/Paste)
-    yellow_shades = ["ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599", "fff2cc", "fff500"]
+    # ✅ รวมรหัสสีเหลืองเกือบทุกเฉด (รวมสีที่ Copy มาจากธีมต่างๆ)
+    yellow_shades = [
+        "ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", 
+        "ffe599", "fff500", "fff100", "ffff33", "ffff66"
+    ]
     
-    # ✅ กลุ่มสีฟ้า (รวมรหัสฟ้ามาตรฐาน และฟ้าเฉดสว่างต่างๆ)
-    blue_shades = ["00ffff", "c9daf8", "a4c2f4", "cfe2f3", "00eeee", "d0e0e3", "00ffff", "a2c4c9"]
+    # ✅ รวมรหัสสีฟ้าเกือบทุกเฉด
+    blue_shades = [
+        "00ffff", "c9daf8", "a4c2f4", "cfe2f3", "00eeee", 
+        "d0e0e3", "a2c4c9", "00ffff", "a2c4c9", "6fa8dc"
+    ]
 
-    # ❌ จะไม่รวมสีชมพู (f4cccc) และสีเขียว (00ff00) เพื่อให้บอทข้ามไปอัตโนมัติ
+    # บอทจะยอมรับเฉพาะในลิสต์นี้ ❌ สีชมพู (f4cccc) และเขียว (00ff00) จะถูกข้าม
     return (c in yellow_shades) or (c in blue_shades)
 
 # ================== API ENDPOINT ==================
@@ -55,7 +60,7 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE (ค้นหาเฉดสีเหลือง/ฟ้า และข้ามชมพู/เขียว) ==================
+# ================== SEARCH CORE (เพิ่มระบบ Debug สี) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     K_INDEX = 10  # HOSPITAL
@@ -67,7 +72,6 @@ def get_district_info(district_name):
 
     if not working_data: return None
 
-    # เรียงแถวจากบนลงล่าง เพื่อหาข้อมูลล่าสุด
     try:
         sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
@@ -88,36 +92,25 @@ def get_district_info(district_name):
         if target == h_val:
             found_any_name = True
             
-            # ✅ ตรวจสอบว่าเป็นเฉดสีเหลือง/ฟ้าที่อนุญาตหรือไม่
-            # ❌ ถ้าเป็นสีชมพูหรือเขียว บอทจะวนลูปข้ามไปดูแถวถัดไปทันที
+            # 🔍 ระบบ Debug: พิมพ์สีที่บอทเห็นจริงๆ ลงใน Log
+            print(f"DEBUG: ตรวจพบ {h_val} ที่แถว {row_idx} มีรหัสสีคือ: {h_color}")
+            
             if is_allowed_color(h_color):
+                print(f"DEBUG: ✅ รหัสสี {h_color} ผ่านเงื่อนไข (เหลือง/ฟ้า)")
                 partner = str(cells[O_INDEX].get("value", "") or "").strip()
                 note = str(cells[P_INDEX].get("value", "") or "").strip()
                 
                 return {
                     "status": "success", 
-                    "data": {
-                        "hospital": h_val,
-                        "partner": partner,
-                        "note": note
-                    }
+                    "data": {"hospital": h_val, "partner": partner, "note": note}
                 }
+            else:
+                print(f"DEBUG: ❌ รหัสสี {h_color} ไม่ผ่าน (อาจเป็นชมพู เขียว หรือรหัสสีใหม่)")
     
     if found_any_name:
         return {"status": "no_color_match", "hospital": target}
     
     return None
-
-# ================== LINE CALLBACK ==================
-@app.route("/callback", methods=["POST"])
-def callback():
-    signature = request.headers.get("X-Line-Signature")
-    body = request.get_data(as_text=True)
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return "OK"
 
 # ================== MESSAGE HANDLER ==================
 @handler.add(MessageEvent, message=TextMessage)
@@ -153,6 +146,5 @@ def handle_message(event):
             )
 
 if __name__ == "__main__":
-    # Render มักจะใช้ port 8080 หรือตามที่ระบุใน ENV
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
