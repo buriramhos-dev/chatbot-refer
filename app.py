@@ -25,12 +25,17 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== STRICT COLOR LOGIC ==================
+# ================== STRICT COLOR LOGIC (แก้ไข: ตัดเขียวออกแล้ว) ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
     clean_hex = color_hex.replace("#", "").lower().strip()
-    # ✅ ยอมรับเฉพาะเหลือง (#ffff00) และฟ้า (#00ffff) เท่านั้น
+    
+    # ✅ บอทจะยอมรับและ "หยุดตอบ" เฉพาะ 2 สีนี้เท่านั้น:
+    # ffff00 = สีเหลืองมาตรฐาน
+    # 00ffff = สีฟ้ามาตรฐาน
+    # (รหัสสีเขียว 00ff00 และชมพู f4cccc จะถูกข้ามไปโดยอัตโนมัติ)
     allowed_strictly = ["ffff00", "00ffff"]
+    
     return clean_hex in allowed_strictly
 
 # ================== API ENDPOINT ==================
@@ -48,7 +53,7 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE (แก้ไข: เลือกแถวบนสุดที่มีสีถูกต้องก่อน) ==================
+# ================== SEARCH CORE (แก้ไข: สแกนหาจนเจอสีเป้าหมายตัวแรกจากบนลงล่าง) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     K_INDEX = 10  # HOSPITAL
@@ -61,13 +66,13 @@ def get_district_info(district_name):
     if not working_data:
         return None
 
-    # แปลง key เป็นตัวเลขและเรียงจากน้อยไปมาก เพื่อให้สแกนจากบนลงล่าง
+    # เรียงลำดับแถวจาก 1 ไปถึงแถวสุดท้าย เพื่อให้สแกนจากบนลงล่าง
     try:
         sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
         sorted_keys = sorted(working_data.keys())
 
-    found_any_name = False  # เช็คว่าเจอชื่อนี้บ้างไหม (เพื่อตอบว่าไม่มีรับกลับ)
+    found_any_name = False 
 
     for row_idx in sorted_keys:
         if str(row_idx) == "1": continue 
@@ -82,11 +87,13 @@ def get_district_info(district_name):
 
         if target == h_val:
             found_any_name = True
-            print(f"DEBUG: เจอชื่อ '{h_val}' ที่แถว {row_idx} สีคือ '{h_color}'")
+            # DEBUG ดูว่าบอทกำลังมองแถวไหนอยู่
+            print(f"DEBUG: ตรวจสอบ '{h_val}' แถว {row_idx} สีคือ '{h_color}'")
             
-            # ✅ ถ้าเจอแถวแรกที่สีถูกต้อง (ฟ้า/เหลือง) ให้หยุดหาและส่งค่าแถวนั้นกลับทันที
+            # ✅ ถ้าเป็นสีชมพู หรือสีเขียว บอทจะ "ไม่เข้า" เงื่อนไขนี้ 
+            # และจะวน Loop ไปเช็คแถวถัดไปด้านล่างทันที
             if is_allowed_color(h_color):
-                print(f"DEBUG: ✅ เลือกแถวบนสุดที่มีสีถูกต้อง: แถวที่ {row_idx}")
+                print(f"DEBUG: ✅ เจอสีเหลือง/ฟ้าแล้ว! ที่แถว {row_idx}")
                 partner = str(cells[O_INDEX].get("value", "") or "").strip()
                 note = str(cells[P_INDEX].get("value", "") or "").strip()
                 
@@ -99,7 +106,7 @@ def get_district_info(district_name):
                     }
                 }
     
-    # หากวนหาจนจบทุุกแถวแล้วเจอแต่ชื่อแต่ไม่มีสีที่ต้องการเลย
+    # ถ้าวนจนจบลูปแล้ว เจอชื่อแต่ไม่มีสีเหลืองหรือฟ้าเลย
     if found_any_name:
         return {"status": "no_color_match", "hospital": target}
     
