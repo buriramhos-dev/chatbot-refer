@@ -25,28 +25,28 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== COLOR CHECK (เฉพาะ เหลือง + ฟ้า เท่านั้น) ==================
-def normalize_color(color_hex):
-    if not color_hex:
-        return ""
-    return color_hex.replace("#", "").lower().strip()
+# ================== UTILS ==================
+def clean_text(txt):
+    return str(txt or "").replace(" ", "").strip().lower()
 
+# ================== COLOR LOGIC (เหลือง + ฟ้า เท่านั้น) ==================
 def is_allowed_color(color_hex):
-    c = normalize_color(color_hex)
+    if not color_hex:
+        return False
 
-    # ✅ สีเหลือง
-    yellow_shades = {
-        "ffff00", "fff2cc", "ffe599", "fff100",
-        "f1c232", "fbef24"
+    c = color_hex.replace("#", "").lower().strip()
+
+    yellow = {
+        "ffff00", "fff2cc", "ffe599",
+        "fff100", "f1c232", "fbef24"
     }
 
-    # ✅ สีฟ้า
-    blue_shades = {
-        "00ffff", "c9daf8", "a4c2f4", "cfe2f3",
-        "d0e0e3", "a2c4c9"
+    blue = {
+        "00ffff", "c9daf8", "a4c2f4",
+        "cfe2f3", "d0e0e3", "a2c4c9"
     }
 
-    return c in yellow_shades or c in blue_shades
+    return c in yellow or c in blue
 
 # ================== API ENDPOINT ==================
 @app.route("/update", methods=["POST"])
@@ -73,9 +73,6 @@ def callback():
     return "OK"
 
 # ================== SEARCH CORE ==================
-def clean_text(txt):
-    return str(txt or "").replace(" ", "").strip().lower()
-
 def get_district_info(district_name):
     target = clean_text(district_name)
 
@@ -94,8 +91,9 @@ def get_district_info(district_name):
     except:
         row_keys = sorted(working_data.keys())
 
-    found_but_no_color = False
+    found_name = False
 
+    # ✅ ไล่จากบน → ล่าง และเอาแถวบนก่อน
     for row_idx in row_keys:
         if str(row_idx) == "1":
             continue
@@ -109,22 +107,26 @@ def get_district_info(district_name):
         h_color = h_cell.get("color")
 
         if h_val == target:
-            if is_allowed_color(h_color):
-                partner = str(cells[PART_COL].get("value") or "").strip()
-                note = str(cells[NOTE_COL].get("value") or "").strip()
+            found_name = True
 
-                return {
-                    "status": "success",
-                    "data": {
-                        "hospital": district_name,
-                        "partner": partner,
-                        "note": note
-                    }
+            # ❌ สีไม่ผ่าน → ข้าม
+            if not is_allowed_color(h_color):
+                continue
+
+            partner = str(cells[PART_COL].get("value") or "").strip()
+            note = str(cells[NOTE_COL].get("value") or "").strip()
+
+            # ✅ เจอแถวแรกที่ชื่อ + สีผ่าน → ใช้ทันที
+            return {
+                "status": "success",
+                "data": {
+                    "hospital": district_name,
+                    "partner": partner,
+                    "note": note
                 }
-            else:
-                found_but_no_color = True
+            }
 
-    if found_but_no_color:
+    if found_name:
         return {"status": "no_color_match", "hospital": district_name}
 
     return None
@@ -136,18 +138,14 @@ def handle_message(event):
         return
 
     raw_text = event.message.text.strip()
-    raw_clean = raw_text.replace(" ", "")
+    raw_clean = clean_text(raw_text)
 
     matched_district = next(
-        (d for d in BURIRAM_DISTRICTS if d.replace(" ", "") in raw_clean),
+        (d for d in BURIRAM_DISTRICTS if clean_text(d) in raw_clean),
         None
     )
 
     if not matched_district:
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="กรุณาพิมพ์ชื่ออำเภอในจังหวัดบุรีรัมย์ค่ะ")
-        )
         return
 
     info = get_district_info(matched_district)
@@ -161,8 +159,8 @@ def handle_message(event):
         if res["note"] and res["note"].lower() != "none":
             display_parts.append(res["note"])
 
-        detail = f" ({' '.join(display_parts)})" if display_parts else ""
-        reply_text = f"มีรับกลับของ {res['hospital']}{detail}"
+        detail_str = f" ({' '.join(display_parts)})" if display_parts else ""
+        reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
 
         line_bot_api.reply_message(
             event.reply_token,
