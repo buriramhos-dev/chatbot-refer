@@ -28,15 +28,9 @@ data_lock = threading.Lock()
 # ================== STRICT COLOR LOGIC ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
-    
-    # ล้างค่าเพื่อให้เช็คได้แม่นยำ
     clean_hex = color_hex.replace("#", "").lower().strip()
-    
-    # ✅ ยอมรับเฉพาะ 2 สีนี้เท่านั้นตามสั่ง
-    # ffff00 = สีเหลืองมาตรฐาน
-    # 00ffff = สีฟ้ามาตรฐาน (Cyan)
+    # ✅ ยอมรับเฉพาะเหลือง (#ffff00) และฟ้า (#00ffff) เท่านั้น
     allowed_strictly = ["ffff00", "00ffff"]
-    
     return clean_hex in allowed_strictly
 
 # ================== API ENDPOINT ==================
@@ -54,10 +48,9 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE ==================
+# ================== SEARCH CORE (แก้ไข: เลือกแถวบนสุดที่มีสีถูกต้องก่อน) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
-    
     K_INDEX = 10  # HOSPITAL
     O_INDEX = 14  # พันธมิตร
     P_INDEX = 15  # หมายเหตุ
@@ -68,12 +61,13 @@ def get_district_info(district_name):
     if not working_data:
         return None
 
+    # แปลง key เป็นตัวเลขและเรียงจากน้อยไปมาก เพื่อให้สแกนจากบนลงล่าง
     try:
         sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
-        sorted_keys = working_data.keys()
+        sorted_keys = sorted(working_data.keys())
 
-    found_name_match = False
+    found_any_name = False  # เช็คว่าเจอชื่อนี้บ้างไหม (เพื่อตอบว่าไม่มีรับกลับ)
 
     for row_idx in sorted_keys:
         if str(row_idx) == "1": continue 
@@ -87,23 +81,26 @@ def get_district_info(district_name):
         h_color = h_cell.get("color")
 
         if target == h_val:
-            found_name_match = True 
+            found_any_name = True
+            print(f"DEBUG: เจอชื่อ '{h_val}' ที่แถว {row_idx} สีคือ '{h_color}'")
             
-            # ดูค่าสีจริงใน Console เพื่อเช็คว่า Google ส่งค่าตรงกับที่เราล็อคไว้ไหม
-            print(f"DEBUG: เจอ '{h_val}' ที่แถว {row_idx} ค่าสีคือ '{h_color}'")
-            
+            # ✅ ถ้าเจอแถวแรกที่สีถูกต้อง (ฟ้า/เหลือง) ให้หยุดหาและส่งค่าแถวนั้นกลับทันที
             if is_allowed_color(h_color):
+                print(f"DEBUG: ✅ เลือกแถวบนสุดที่มีสีถูกต้อง: แถวที่ {row_idx}")
                 partner = str(cells[O_INDEX].get("value", "") or "").strip()
                 note = str(cells[P_INDEX].get("value", "") or "").strip()
-
+                
                 return {
-                    "status": "success",
-                    "hospital": h_val,
-                    "partner": partner,
-                    "note": note
+                    "status": "success", 
+                    "data": {
+                        "hospital": h_val,
+                        "partner": partner,
+                        "note": note
+                    }
                 }
     
-    if found_name_match:
+    # หากวนหาจนจบทุุกแถวแล้วเจอแต่ชื่อแต่ไม่มีสีที่ต้องการเลย
+    if found_any_name:
         return {"status": "no_color_match", "hospital": target}
     
     return None
@@ -135,12 +132,13 @@ def handle_message(event):
     
     if info:
         if info["status"] == "success":
+            res = info["data"]
             details = []
-            if info['partner']: details.append(info['partner'])
-            if info['note']: details.append(info['note'])
+            if res['partner']: details.append(res['partner'])
+            if res['note']: details.append(res['note'])
             
             detail_str = f" ({' '.join(details)})" if details else ""
-            reply_text = f"มีรับกลับของ {info['hospital']}{detail_str}"
+            reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
             
             line_bot_api.reply_message(
                 event.reply_token,
@@ -148,7 +146,6 @@ def handle_message(event):
                  TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
             )
         elif info["status"] == "no_color_match":
-            # หากชื่อตรงแต่สีไม่ใช่ #ffff00 หรือ #00ffff บอทจะตอบว่าไม่มี
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text=f"ไม่มีรับกลับของ {info['hospital']}")
