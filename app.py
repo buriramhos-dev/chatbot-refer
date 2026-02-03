@@ -2,7 +2,8 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os, threading
+import os
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,9 +21,9 @@ BURIRAM_DISTRICTS = [
     "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
-# ✅ map ชื่ออำเภอแบบ clean
-DISTRICT_MAP = { 
-    "".join(h.split()).lower(): h for h in BURIRAM_DISTRICTS 
+# map ชื่ออำเภอแบบ clean
+DISTRICT_MAP = {
+    "".join(h.split()).lower(): h for h in BURIRAM_DISTRICTS
 }
 
 latest_rows = []
@@ -33,24 +34,28 @@ lock = threading.Lock()
 def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-# ✅ เช็กเฉพาะสีฟ้า + เหลือง
+# ✅ เช็กเฉพาะสีฟ้า + เหลือง (รองรับ Google Sheet)
 def is_blue_or_yellow(color):
     c = str(color or "").strip().lower()
-    return c in [
-        "blue", "yellow",
-        "ฟ้า", "เหลือง",
-        "#00b0f0",   # ฟ้า
-        "#ffff00"    # เหลือง
-    ]
+    return (
+        c.startswith("#00b0f0") or   # ฟ้า
+        c.startswith("#ffff00")     # เหลือง
+    )
 
 # ================= API =================
 @app.route("/update", methods=["POST"])
 def update():
     global latest_rows, sheet_ready
-    data = request.json
+    data = request.json or {}
+    rows = data.get("rows", [])
+
+    # ❗ กันข้อมูลว่าง ไม่ล้างของเดิม
+    if not rows:
+        print("⚠️ IGNORE empty rows")
+        return "IGNORED"
 
     with lock:
-        latest_rows = data.get("rows", [])
+        latest_rows = rows
         sheet_ready = True
 
     print("SYNC ROWS:", len(latest_rows))
@@ -107,7 +112,7 @@ def handle(event):
 
     text = clean(event.message.text)
 
-    # ✅ หาอำเภอแบบไม่พลาด
+    # หาอำเภอจากข้อความ
     hospital = next(
         (real for key, real in DISTRICT_MAP.items() if key in text),
         None
