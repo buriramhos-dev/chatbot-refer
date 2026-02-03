@@ -2,8 +2,9 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os, threading
+import os
 from dotenv import load_dotenv
+import threading
 
 load_dotenv()
 app = Flask(__name__)
@@ -11,161 +12,173 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
-latest_rows = []
+# ================== DISTRICT CONFIG ==================
+BURIRAM_DISTRICTS = [
+    "เมืองบุรีรัมย์","คูเมือง","กระสัง","นางรอง","หนองกี่","ละหานทราย",
+    "ประโคนชัย","บ้านกรวด","พุทไธสง","ลำปลายมาศ","สตึก","บ้านด่าน",
+    "ห้วยราช","โนนสุวรรณ","ปะคำ","นาโพธิ์","หนองหงส์","พลับพลาชัย",
+    "เฉลิมพระเกียรติ","ชำนิ","บ้านใหม่ไชยพจน์","โนนดินแดง","แคนดง",
+    "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
+]
+
+latest_sheet_data = {}
 sheet_ready = False
-lock = threading.Lock()
+data_lock = threading.Lock()
 
-# ================= UTILS =================
-def clean(txt):
-    return str(txt or "").strip().lower()
+# ================== COLOR CHECK (เฉพาะ เหลือง + ฟ้า เท่านั้น) ==================
+def normalize_color(color_hex):
+    if not color_hex:
+        return ""
+    return color_hex.replace("#", "").lower().strip()
 
-def is_allowed_color(color):
-    if not color:
-        return False
+def is_allowed_color(color_hex):
+    c = normalize_color(color_hex)
 
-    c = str(color).replace("#", "").lower()
-
-    # ✅ สีเหลืองที่อนุญาต
-    yellow = {
-        "ffff00",  # เหลืองสด
-        "fff2cc",
-        "ffe599",
-        "fff100",
-        "f1c232",
-        "fbef24",
-        "fff9c4"
+    # ✅ สีเหลือง
+    yellow_shades = {
+        "ffff00", "fff2cc", "ffe599", "fff100",
+        "f1c232", "fbef24"
     }
 
-    # ✅ สีฟ้าที่อนุญาต
-    blue = {
-        "00ffff",
-        "c9daf8",
-        "a4c2f4",
-        "cfe2f3",
-        "d0e0e3",
-        "a2c4c9",
-        "9fc5e8",
-        "bcd4e6"
+    # ✅ สีฟ้า
+    blue_shades = {
+        "00ffff", "c9daf8", "a4c2f4", "cfe2f3",
+        "d0e0e3", "a2c4c9"
     }
 
-    return c in yellow or c in blue
+    return c in yellow_shades or c in blue_shades
 
-# ================= API =================
+# ================== API ENDPOINT ==================
 @app.route("/update", methods=["POST"])
-def update():
-    global latest_rows, sheet_ready
-    data = request.json or {}
+def update_sheet():
+    global latest_sheet_data, sheet_ready
+    data = request.json
+    if not data or "full_sheet_data" not in data:
+        return "Invalid payload", 400
 
-    with lock:
-        latest_rows = data.get("rows", [])
+    with data_lock:
+        latest_sheet_data = data["full_sheet_data"]
         sheet_ready = True
 
-    print("✅ SYNC ROWS:", len(latest_rows))
-    return "OK"
+    return "OK", 200
 
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature")
     body = request.get_data(as_text=True)
-
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
-
     return "OK"
 
-# ================= CORE LOGIC =================
-def find_hospital_from_text(text):
-    target_text = clean(text)
+# ================== SEARCH CORE ==================
+def clean_text(txt):
+    return str(txt or "").replace(" ", "").strip().lower()
 
-    with lock:
-        rows = list(latest_rows)
+def get_district_info(district_name):
+    target = clean_text(district_name)
 
-    rows.sort(key=lambda r: r.get("row_no", 0))
+    HOSP_COL = 10  # K
+    PART_COL = 14  # O
+    NOTE_COL = 15  # P
 
-    found_valid = []
-    found_name_only = None
+    with data_lock:
+        working_data = latest_sheet_data.copy()
 
-    for row in rows:
-        hospital_name = row.get("hospital", "")
-        if not hospital_name:
+    if not working_data:
+        return None
+
+    try:
+        row_keys = sorted(working_data.keys(), key=lambda x: int(x))
+    except:
+        row_keys = sorted(working_data.keys())
+
+    found_but_no_color = False
+
+    for row_idx in row_keys:
+        if str(row_idx) == "1":
             continue
 
-        name_clean = clean(hospital_name)
+        cells = working_data.get(row_idx)
+        if not isinstance(cells, list) or len(cells) <= NOTE_COL:
+            continue
 
-        # ✅ ถ้าชื่อโรงพยาบาลอยู่ในข้อความ user
-        if name_clean and name_clean in target_text:
-            color = row.get("row_color")
+        h_cell = cells[HOSP_COL]
+        h_val = clean_text(h_cell.get("value"))
+        h_color = h_cell.get("color")
 
-            print("MATCH:", hospital_name, "COLOR:", color)
+        if h_val == target:
+            if is_allowed_color(h_color):
+                partner = str(cells[PART_COL].get("value") or "").strip()
+                note = str(cells[NOTE_COL].get("value") or "").strip()
 
-            # ถ้าพบชื่อ แต่สีไม่ผ่าน เก็บไว้เผื่อ fallback
-            if not is_allowed_color(color):
-                found_name_only = hospital_name
-                continue
+                return {
+                    "status": "success",
+                    "data": {
+                        "hospital": district_name,
+                        "partner": partner,
+                        "note": note
+                    }
+                }
+            else:
+                found_but_no_color = True
 
-            # ถ้าสีผ่าน เก็บเป็นตัวเลือกที่ใช้ได้
-            found_valid.append({
-                "hospital": hospital_name,
-                "partner": row.get("partner", "").strip(),
-                "note": row.get("note", "").strip()
-            })
+    if found_but_no_color:
+        return {"status": "no_color_match", "hospital": district_name}
 
-    # ✅ ถ้ามีแถวที่สีผ่าน อย่างน้อย 1 แถว
-    if found_valid:
-        return "OK", found_valid[0]
+    return None
 
-    # ❌ พบชื่อ แต่สีไม่ผ่านทั้งหมด
-    if found_name_only:
-        return "NO_COLOR", found_name_only
-
-    # ❌ ไม่พบเลย
-    return "NOT_FOUND", None
-
-# ================= LINE HANDLER =================
+# ================== MESSAGE HANDLER ==================
 @handler.add(MessageEvent, message=TextMessage)
-def handle(event):
+def handle_message(event):
     if not sheet_ready:
-        print("⚠️ SHEET NOT READY")
         return
 
-    text = event.message.text
-    status, result = find_hospital_from_text(text)
+    raw_text = event.message.text.strip()
+    raw_clean = raw_text.replace(" ", "")
 
-    # ❌ ไม่พบชื่อโรงพยาบาล
-    if status == "NOT_FOUND":
-        return
+    matched_district = next(
+        (d for d in BURIRAM_DISTRICTS if d.replace(" ", "") in raw_clean),
+        None
+    )
 
-    # ❌ พบชื่อ แต่สีไม่ผ่าน
-    if status == "NO_COLOR":
-        hospital = result
-        reply = f"ไม่มีรับกลับของ {hospital}"
-
+    if not matched_district:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=reply)
+            TextSendMessage(text="กรุณาพิมพ์ชื่ออำเภอในจังหวัดบุรีรัมย์ค่ะ")
         )
         return
 
-    # ✅ สีผ่าน
-    if status == "OK":
-        hospital = result["hospital"]
-        parts = []
+    info = get_district_info(matched_district)
 
-        if result["partner"]:
-            parts.append(result["partner"])
-        if result["note"]:
-            parts.append(result["note"])
+    if info and info["status"] == "success":
+        res = info["data"]
 
-        detail = f" ({' '.join(parts)})" if parts else ""
-        reply = f"มีรับกลับของ {hospital}{detail}"
+        display_parts = []
+        if res["partner"] and res["partner"].lower() != "none":
+            display_parts.append(res["partner"])
+        if res["note"] and res["note"].lower() != "none":
+            display_parts.append(res["note"])
+
+        detail = f" ({' '.join(display_parts)})" if display_parts else ""
+        reply_text = f"มีรับกลับของ {res['hospital']}{detail}"
 
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=reply)
+            [
+                TextSendMessage(text=reply_text),
+                TextSendMessage(text="ล้อหมุนกี่โมงคะ?")
+            ]
         )
 
-# ================= RUN =================
+    elif info and info["status"] == "no_color_match":
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=f"ไม่มีรับกลับของ {info['hospital']}")
+        )
+
+# ================== RUN ==================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
