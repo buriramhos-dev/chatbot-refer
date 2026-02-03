@@ -25,25 +25,21 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== STRICT COLOR LOGIC (เพิ่มเฉดสีให้ครอบคลุมที่สุด) ==================
+# ================== STRICT COLOR LOGIC (เพิ่มสีเขียวสะท้อนแสงตามภาพ) ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
     c = color_hex.replace("#", "").lower().strip()
     
-    # ✅ รวมรหัสสีเหลืองเกือบทุกเฉด (รวมสีที่ Copy มาจากธีมต่างๆ)
-    yellow_shades = [
-        "ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", 
-        "ffe599", "fff500", "fff100", "ffff33", "ffff66"
-    ]
+    # ✅ รวมสีเหลืองทุกเฉด
+    yellow_shades = ["ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599"]
     
-    # ✅ รวมรหัสสีฟ้าเกือบทุกเฉด
-    blue_shades = [
-        "00ffff", "c9daf8", "a4c2f4", "cfe2f3", "00eeee", 
-        "d0e0e3", "a2c4c9", "00ffff", "a2c4c9", "6fa8dc"
-    ]
+    # ✅ รวมสีฟ้าทุกเฉด
+    blue_shades = ["00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3", "a2c4c9"]
+    
+    # ✅ เพิ่มสีเขียวสะท้อนแสง (Neon Green) ตามที่เห็นในภาพล่าสุด
+    green_shades = ["00ff00", "b7e1cd", "d9ead3"]
 
-    # บอทจะยอมรับเฉพาะในลิสต์นี้ ❌ สีชมพู (f4cccc) และเขียว (00ff00) จะถูกข้าม
-    return (c in yellow_shades) or (c in blue_shades)
+    return (c in yellow_shades) or (c in blue_shades) or (c in green_shades)
 
 # ================== API ENDPOINT ==================
 @app.route("/update", methods=["POST"])
@@ -52,24 +48,28 @@ def update_sheet():
     data = request.json
     if not data or "full_sheet_data" not in data:
         return "Invalid payload", 400
-
     with data_lock:
         latest_sheet_data = data["full_sheet_data"]
         sheet_ready = True
-
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE (เพิ่มระบบ Debug สี) ==================
+# !!! ส่วนที่ขาดไปทำให้บอทไม่ตอบเลย !!!
+@app.route("/callback", methods=["POST"])
+def callback():
+    signature = request.headers.get("X-Line-Signature")
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return "OK"
+
+# ================== SEARCH CORE ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
-    K_INDEX = 10  # HOSPITAL
-    O_INDEX = 14  # พันธมิตร
-    P_INDEX = 15  # หมายเหตุ
-
     with data_lock:
         working_data = latest_sheet_data.copy()
-
     if not working_data: return None
 
     try:
@@ -78,66 +78,48 @@ def get_district_info(district_name):
         sorted_keys = sorted(working_data.keys())
 
     found_any_name = False 
-
     for row_idx in sorted_keys:
         if str(row_idx) == "1": continue 
-        
         cells = working_data[row_idx]
-        if not isinstance(cells, list) or len(cells) <= P_INDEX: continue
+        if not isinstance(cells, list) or len(cells) <= 15: continue
 
-        h_cell = cells[K_INDEX]
+        h_cell = cells[10] # HOSPITAL
         h_val = str(h_cell.get("value", "") or "").strip()
         h_color = h_cell.get("color")
 
         if target == h_val:
             found_any_name = True
-            
-            # 🔍 ระบบ Debug: พิมพ์สีที่บอทเห็นจริงๆ ลงใน Log
-            print(f"DEBUG: ตรวจพบ {h_val} ที่แถว {row_idx} มีรหัสสีคือ: {h_color}")
-            
             if is_allowed_color(h_color):
-                print(f"DEBUG: ✅ รหัสสี {h_color} ผ่านเงื่อนไข (เหลือง/ฟ้า)")
-                partner = str(cells[O_INDEX].get("value", "") or "").strip()
-                note = str(cells[P_INDEX].get("value", "") or "").strip()
-                
+                partner = str(cells[14].get("value", "") or "").strip()
+                note = str(cells[15].get("value", "") or "").strip()
                 return {
                     "status": "success", 
                     "data": {"hospital": h_val, "partner": partner, "note": note}
                 }
-            else:
-                print(f"DEBUG: ❌ รหัสสี {h_color} ไม่ผ่าน (อาจเป็นชมพู เขียว หรือรหัสสีใหม่)")
     
     if found_any_name:
         return {"status": "no_color_match", "hospital": target}
-    
     return None
 
 # ================== MESSAGE HANDLER ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     if not sheet_ready: return
-
     raw_text = event.message.text.strip()
     matched_district = next((d for d in BURIRAM_DISTRICTS if d in raw_text), None)
-
     if not matched_district: return
 
     info = get_district_info(matched_district)
-    
     if info:
         if info["status"] == "success":
             res = info["data"]
-            details = []
-            if res['partner']: details.append(res['partner'])
-            if res['note']: details.append(res['note'])
-            
-            detail_str = f" ({' '.join(details)})" if details else ""
+            details = [res['partner'], res['note']]
+            detail_str = f" ({' '.join(filter(None, details))})" if any(details) else ""
             reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
             
             line_bot_api.reply_message(
                 event.reply_token,
-                [TextSendMessage(text=reply_text), 
-                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
+                [TextSendMessage(text=reply_text), TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
             )
         elif info["status"] == "no_color_match":
             line_bot_api.reply_message(
