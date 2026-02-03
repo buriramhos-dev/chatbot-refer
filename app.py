@@ -32,19 +32,12 @@ lock = threading.Lock()
 def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-# ✅ เช็กเฉพาะ “ฟ้า + เหลือง” (ครอบคลุมสีจริงจาก Sheet)
+# ✅ เช็กเฉพาะสีที่กำหนดจริงจาก Sheet
+# ฟ้า = #00ffff
+# เหลือง = #ffff00
 def is_blue_or_yellow(color):
-    c = str(color or "").lower()
-
-    # ฟ้า / ฟ้าอมเขียว
-    if c.startswith("#00b0") or c.startswith("#00ff") or c == "#00ffff":
-        return True
-
-    # เหลือง
-    if c.startswith("#ffff"):
-        return True
-
-    return False
+    c = str(color or "").strip().lower()
+    return c in ("#00ffff", "#ffff00")
 
 # ================= API =================
 @app.route("/update", methods=["POST"])
@@ -87,7 +80,7 @@ def find_hospital(hospital_name):
 
         found = True
 
-        # ✅ กรองเฉพาะสีฟ้า + เหลือง
+        # ✅ กรองเฉพาะฟ้า + เหลือง
         if not is_blue_or_yellow(row.get("color")):
             continue
 
