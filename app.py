@@ -21,7 +21,7 @@ BURIRAM_DISTRICTS = [
     "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
-latest_sheet_data = {}
+latest_sheet_data = []   # ✅ เปลี่ยนเป็น list
 sheet_ready = False
 data_lock = threading.Lock()
 
@@ -53,11 +53,13 @@ def is_allowed_color(color_hex):
 def update_sheet():
     global latest_sheet_data, sheet_ready
     data = request.json
-    if not data or "full_sheet_data" not in data:
+
+    # ✅ รับ rows จาก GAS ตรง ๆ
+    if not data or "rows" not in data:
         return "Invalid payload", 400
 
     with data_lock:
-        latest_sheet_data = data["full_sheet_data"]
+        latest_sheet_data = data["rows"]
         sheet_ready = True
 
     return "OK", 200
@@ -76,56 +78,36 @@ def callback():
 def get_district_info(district_name):
     target = clean_text(district_name)
 
-    HOSP_COL = 10  # K
-    PART_COL = 14  # O
-    NOTE_COL = 15  # P
-
     with data_lock:
-        working_data = latest_sheet_data.copy()
+        rows = list(latest_sheet_data)
 
-    if not working_data:
+    if not rows:
         return None
-
-    try:
-        row_keys = sorted(working_data.keys(), key=lambda x: int(x))
-    except:
-        row_keys = sorted(working_data.keys())
 
     found_name = False
 
-    # ✅ ไล่จากบน → ล่าง
-    for row_idx in row_keys:
-        if str(row_idx) == "1":
-            continue
+    # ✅ ไล่จากบน → ล่าง ตามลำดับชีท
+    for row in rows:
+        hospital = clean_text(row.get("hospital"))
 
-        cells = working_data.get(row_idx)
-        if not isinstance(cells, list) or len(cells) <= NOTE_COL:
-            continue
-
-        h_cell = cells[HOSP_COL]
-        h_val = clean_text(h_cell.get("value"))
-        h_color = h_cell.get("color")
-
-        # ชื่อไม่ตรง → ข้าม
-        if target not in h_val:
+        if hospital != target:
             continue
 
         found_name = True
 
+        color = row.get("row_color")
+
         # สีไม่ผ่าน → ข้าม แต่ยังหาต่อ
-        if not is_allowed_color(h_color):
+        if not is_allowed_color(color):
             continue
 
         # ✅ เจอแถวแรกที่ชื่อถูก + สีผ่าน
-        partner = str(cells[PART_COL].get("value") or "").strip()
-        note = str(cells[NOTE_COL].get("value") or "").strip()
-
         return {
             "status": "success",
             "data": {
                 "hospital": district_name,
-                "partner": partner,
-                "note": note
+                "partner": row.get("partner", ""),
+                "note": row.get("note", "")
             }
         }
 
