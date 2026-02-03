@@ -110,7 +110,7 @@ def handle(event):
         )
         return
 
-    # ✅ สีผ่าน
+
     if status == "OK":
         hospital = result["hospital"]
         parts = []
