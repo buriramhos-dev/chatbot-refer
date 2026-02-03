@@ -74,7 +74,6 @@ def find_hospital_from_text(text):
         hospital_name = row.get("hospital", "")
         if clean(hospital_name) and clean(hospital_name) in target_text:
 
-            # เจอชื่อโรงพยาบาลแล้ว 
             if not is_allowed_color(row.get("row_color")):
                 return "NO_COLOR", hospital_name
 
