@@ -72,7 +72,7 @@ def callback():
         abort(400)
     return "OK"
 
-# ================== SEARCH CORE ==================
+# ================== SEARCH CORE (FINAL LOGIC A) ==================
 def get_district_info(district_name):
     target = clean_text(district_name)
 
@@ -93,7 +93,7 @@ def get_district_info(district_name):
 
     found_name = False
 
-    # ✅ ไล่จากบน → ล่าง และเอาแถวบนก่อน
+    # ✅ ไล่จากบน → ล่าง
     for row_idx in row_keys:
         if str(row_idx) == "1":
             continue
@@ -106,26 +106,30 @@ def get_district_info(district_name):
         h_val = clean_text(h_cell.get("value"))
         h_color = h_cell.get("color")
 
-        if h_val == target:
-            found_name = True
+        # ชื่อไม่ตรง → ข้าม
+        if target not in h_val:
+            continue
 
-            # ❌ สีไม่ผ่าน → ข้าม
-            if not is_allowed_color(h_color):
-                continue
+        found_name = True
 
-            partner = str(cells[PART_COL].get("value") or "").strip()
-            note = str(cells[NOTE_COL].get("value") or "").strip()
+        # สีไม่ผ่าน → ข้าม แต่ยังหาต่อ
+        if not is_allowed_color(h_color):
+            continue
 
-            # ✅ เจอแถวแรกที่ชื่อ + สีผ่าน → ใช้ทันที
-            return {
-                "status": "success",
-                "data": {
-                    "hospital": district_name,
-                    "partner": partner,
-                    "note": note
-                }
+        # ✅ เจอแถวแรกที่ชื่อถูก + สีผ่าน
+        partner = str(cells[PART_COL].get("value") or "").strip()
+        note = str(cells[NOTE_COL].get("value") or "").strip()
+
+        return {
+            "status": "success",
+            "data": {
+                "hospital": district_name,
+                "partner": partner,
+                "note": note
             }
+        }
 
+    # เจอชื่อ แต่ไม่มีแถวไหนสีผ่าน
     if found_name:
         return {"status": "no_color_match", "hospital": district_name}
 
