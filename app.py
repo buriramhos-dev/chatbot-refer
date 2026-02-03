@@ -2,8 +2,7 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os
-import threading
+import os, threading
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,9 +20,8 @@ BURIRAM_DISTRICTS = [
     "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
-# map ชื่ออำเภอแบบ clean
 DISTRICT_MAP = {
-    "".join(h.split()).lower(): h for h in BURIRAM_DISTRICTS
+    "".join(d.split()).lower(): d for d in BURIRAM_DISTRICTS
 }
 
 latest_rows = []
@@ -34,25 +32,33 @@ lock = threading.Lock()
 def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-# ✅ เช็กเฉพาะสีฟ้า + เหลือง (รองรับ Google Sheet)
+# ✅ เช็กเฉพาะสีฟ้า + เหลือง (แบบทนทุก hex)
 def is_blue_or_yellow(color):
-    c = str(color or "").strip().lower()
-    return (
-        c.startswith("#00b0f0") or   # ฟ้า
-        c.startswith("#ffff00")     # เหลือง
-    )
+    if not color:
+        return False
+
+    c = color.lower()
+
+    # เหลือง
+    if c.startswith("#ffff"):
+        return True
+
+    # ฟ้า / cyan / ฟ้าอ่อน (Sheets ใช้บ่อย)
+    if c.startswith("#00") or c.startswith("#66") or c.startswith("#99"):
+        return True
+
+    return False
 
 # ================= API =================
 @app.route("/update", methods=["POST"])
 def update():
     global latest_rows, sheet_ready
     data = request.json or {}
-    rows = data.get("rows", [])
 
-    # ❗ กันข้อมูลว่าง ไม่ล้างของเดิม
-    if not rows:
-        print("⚠️ IGNORE empty rows")
-        return "IGNORED"
+    rows = [
+        r for r in data.get("rows", [])
+        if r.get("hospital")
+    ]
 
     with lock:
         latest_rows = rows
@@ -73,23 +79,23 @@ def callback():
 
     return "OK"
 
-# ================= CORE LOGIC =================
+# ================= CORE =================
 def find_hospital(hospital_name):
     target = clean(hospital_name)
 
     with lock:
         rows = list(latest_rows)
 
-    found_name = False
+    found = False
     rows.sort(key=lambda r: r.get("row_no", 0))
 
     for row in rows:
         if clean(row.get("hospital")) != target:
             continue
 
-        found_name = True
+        found = True
 
-        # ✅ ตอบเฉพาะสีฟ้า + เหลือง
+        # ✅ รับเฉพาะสีฟ้า + เหลือง
         if not is_blue_or_yellow(row.get("color")):
             continue
 
@@ -99,12 +105,12 @@ def find_hospital(hospital_name):
             "note": row.get("note", "")
         }
 
-    if found_name:
+    if found:
         return "NO_ACCEPT"
 
     return None
 
-# ================= LINE HANDLER =================
+# ================= LINE =================
 @handler.add(MessageEvent, message=TextMessage)
 def handle(event):
     if not sheet_ready:
@@ -112,7 +118,6 @@ def handle(event):
 
     text = clean(event.message.text)
 
-    # หาอำเภอจากข้อความ
     hospital = next(
         (real for key, real in DISTRICT_MAP.items() if key in text),
         None
