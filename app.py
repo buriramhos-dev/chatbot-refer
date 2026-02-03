@@ -25,17 +25,16 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== STRICT COLOR LOGIC ==================
+# ================== STRICT COLOR LOGIC (ถอดสีเขียวออกแล้ว) ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
     c = color_hex.replace("#", "").lower().strip()
     
-    # ✅ รวมสีเหลือง ฟ้า และเขียวสะท้อนแสงตามภาพ
+    # ✅ อนุญาตเฉพาะสีเหลืองและสีฟ้า (ถอด 00ff00 ออกเพื่อให้ข้ามสีเขียว)
     yellow_shades = ["ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599"]
     blue_shades = ["00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3", "a2c4c9"]
-    green_shades = ["00ff00", "b7e1cd", "d9ead3"]
 
-    return (c in yellow_shades) or (c in blue_shades) or (c in green_shades)
+    return (c in yellow_shades) or (c in blue_shades)
 
 # ================== API ENDPOINT ==================
 @app.route("/update", methods=["POST"])
@@ -47,7 +46,6 @@ def update_sheet():
     with data_lock:
         latest_sheet_data = data["full_sheet_data"]
         sheet_ready = True
-    print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
 @app.route("/callback", methods=["POST"])
@@ -60,7 +58,7 @@ def callback():
         abort(400)
     return "OK"
 
-# ================== SEARCH CORE (แก้ไขการดึงคอลัมน์ O และ P) ==================
+# ================== SEARCH CORE (ปรับตำแหน่งคอลัมน์ O P) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     HOSP_COL = 10  # คอลัมน์ K (HOSPITAL)
@@ -81,7 +79,7 @@ def get_district_info(district_name):
         if str(row_idx) == "1": continue 
         cells = working_data[row_idx]
         
-        # ตรวจสอบว่าข้อมูลมีถึงคอลัมน์ P หรือไม่
+        # ตรวจสอบว่ามีข้อมูลถึงคอลัมน์ P หรือไม่
         if not isinstance(cells, list) or len(cells) <= NOTE_COL: continue
 
         h_cell = cells[HOSP_COL]
@@ -90,8 +88,8 @@ def get_district_info(district_name):
 
         if target == h_val:
             found_any_name = True
+            # ตรวจสี: ถ้าเป็นสีเขียว บอทจะข้ามไป (ไม่เข้าเงื่อนไข success)
             if is_allowed_color(h_color):
-                # ดึงข้อมูลจากคอลัมน์ O และ P
                 partner = str(cells[PART_COL].get("value", "") or "").strip()
                 note = str(cells[NOTE_COL].get("value", "") or "").strip()
                 
@@ -108,7 +106,7 @@ def get_district_info(district_name):
         return {"status": "no_color_match", "hospital": target}
     return None
 
-# ================== MESSAGE HANDLER (ปรับการตอบกลับพร้อมหมายเหตุ) ==================
+# ================== MESSAGE HANDLER ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     if not sheet_ready: return
@@ -121,12 +119,14 @@ def handle_message(event):
         if info["status"] == "success":
             res = info["data"]
             
-            # รวบรวมข้อมูลจาก O (พันธมิตร) และ P (หมายเหตุ)
+            # ดึงข้อมูลจาก O และ P มาตอบ
             extra_info = []
-            if res['partner']: extra_info.append(res['partner'])
-            if res['note']: extra_info.append(res['note'])
+            if res['partner'] and res['partner'].lower() != "none":
+                extra_info.append(res['partner'])
+            if res['note'] and res['note'].lower() != "none":
+                extra_info.append(res['note'])
             
-            # จัดรูปแบบข้อความในวงเล็บ
+            # จัดรูปแบบข้อความในวงเล็บให้สวยงาม
             detail_str = f" ({' '.join(extra_info)})" if extra_info else ""
             reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
             
