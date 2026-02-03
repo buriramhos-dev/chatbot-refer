@@ -25,19 +25,19 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== STRICT COLOR LOGIC (ฉบับแก้ไข: รองรับเฉดสีจากการ Copy) ==================
+# ================== STRICT COLOR LOGIC (รองรับเฉดสีจากการ Copy) ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
     # ล้างค่ารหัสสีให้เป็นตัวพิมพ์เล็กเพื่อเปรียบเทียบ
     c = color_hex.replace("#", "").lower().strip()
     
-    # ✅ กลุ่มสีเหลือง (รวมเหลืองมาตรฐาน และเหลืองจากการ Copy/Paste เฉดต่างๆ)
-    yellow_shades = ["ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599", "fff2cc"]
+    # ✅ กลุ่มสีเหลือง (รวมรหัสที่พบบ่อยใน Google Sheets และจากการ Copy/Paste)
+    yellow_shades = ["ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599", "fff2cc", "fff500"]
     
-    # ✅ กลุ่มสีฟ้า (รวมฟ้ามาตรฐาน และฟ้าจากการ Copy/Paste เฉดต่างๆ)
-    blue_shades = ["00ffff", "c9daf8", "a4c2f4", "cfe2f3", "00eeee", "d0e0e3", "00ffff"]
+    # ✅ กลุ่มสีฟ้า (รวมรหัสฟ้ามาตรฐาน และฟ้าเฉดสว่างต่างๆ)
+    blue_shades = ["00ffff", "c9daf8", "a4c2f4", "cfe2f3", "00eeee", "d0e0e3", "00ffff", "a2c4c9"]
 
-    # ❌ รหัสสีชมพู (f4cccc) และเขียว (00ff00) จะไม่ถูกรวมในนี้ ทำให้บอทข้ามไปอัตโนมัติ
+    # ❌ จะไม่รวมสีชมพู (f4cccc) และสีเขียว (00ff00) เพื่อให้บอทข้ามไปอัตโนมัติ
     return (c in yellow_shades) or (c in blue_shades)
 
 # ================== API ENDPOINT ==================
@@ -55,7 +55,7 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE (แก้ไข: ข้ามสีชมพู/เขียว และค้นหาเฉดเหลือง/ฟ้า) ==================
+# ================== SEARCH CORE (ค้นหาเฉดสีเหลือง/ฟ้า และข้ามชมพู/เขียว) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     K_INDEX = 10  # HOSPITAL
@@ -65,10 +65,9 @@ def get_district_info(district_name):
     with data_lock:
         working_data = latest_sheet_data.copy()
 
-    if not working_data:
-        return None
+    if not working_data: return None
 
-    # เรียงลำดับแถวจากบนลงล่าง
+    # เรียงแถวจากบนลงล่าง เพื่อหาข้อมูลล่าสุด
     try:
         sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
@@ -80,8 +79,7 @@ def get_district_info(district_name):
         if str(row_idx) == "1": continue 
         
         cells = working_data[row_idx]
-        if not isinstance(cells, list) or len(cells) <= P_INDEX:
-            continue
+        if not isinstance(cells, list) or len(cells) <= P_INDEX: continue
 
         h_cell = cells[K_INDEX]
         h_val = str(h_cell.get("value", "") or "").strip()
@@ -90,8 +88,8 @@ def get_district_info(district_name):
         if target == h_val:
             found_any_name = True
             
-            # 🟢 เช็คว่าสีแถวนี้อยู่ในกลุ่ม "เหลือง" หรือ "ฟ้า" ที่เราอนุญาตหรือไม่
-            # ❌ ถ้าเป็นสีชมพู/เขียว บอทจะวนลูปข้ามไปดูแถวถัดไปด้านล่างทันที
+            # ✅ ตรวจสอบว่าเป็นเฉดสีเหลือง/ฟ้าที่อนุญาตหรือไม่
+            # ❌ ถ้าเป็นสีชมพูหรือเขียว บอทจะวนลูปข้ามไปดูแถวถัดไปทันที
             if is_allowed_color(h_color):
                 partner = str(cells[O_INDEX].get("value", "") or "").strip()
                 note = str(cells[P_INDEX].get("value", "") or "").strip()
@@ -105,7 +103,6 @@ def get_district_info(district_name):
                     }
                 }
     
-    # หากหาจนจบทุุกแถวแล้วเจอแต่ชื่ออำเภอ แต่ไม่มีเฉดสีที่ต้องการเลย
     if found_any_name:
         return {"status": "no_color_match", "hospital": target}
     
@@ -125,14 +122,12 @@ def callback():
 # ================== MESSAGE HANDLER ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    if not sheet_ready:
-        return
+    if not sheet_ready: return
 
     raw_text = event.message.text.strip()
     matched_district = next((d for d in BURIRAM_DISTRICTS if d in raw_text), None)
 
-    if not matched_district:
-        return
+    if not matched_district: return
 
     info = get_district_info(matched_district)
     
@@ -158,5 +153,6 @@ def handle_message(event):
             )
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    # Render มักจะใช้ port 8080 หรือตามที่ระบุใน ENV
+    port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
