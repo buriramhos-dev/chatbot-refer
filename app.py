@@ -29,7 +29,7 @@ data_lock = threading.Lock()
 def clean_text(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-# ================== COLOR LOGIC (ฟ้า + เหลือง เท่านั้น) ==================
+# ================== COLOR LOGIC ==================
 def is_allowed_color(color_hex):
     if not color_hex:
         return False
@@ -47,6 +47,14 @@ def is_allowed_color(color_hex):
     }
 
     return c in yellow or c in blue
+
+def row_has_allowed_color(cells):
+    """เช็คว่าทั้งแถวมีสีฟ้าหรือเหลืองหรือไม่"""
+    for cell in cells:
+        if isinstance(cell, dict):
+            if is_allowed_color(cell.get("color")):
+                return True
+    return False
 
 # ================== API ENDPOINT ==================
 @app.route("/update", methods=["POST"])
@@ -93,7 +101,6 @@ def get_district_info(district_name):
 
     found_name = False
 
-    # 🔑 ไล่จากบน → ล่าง และเอาแถวบนสุดที่เป็น ฟ้า/เหลือง
     for row in row_keys:
         if str(row) == "1":
             continue
@@ -102,21 +109,18 @@ def get_district_info(district_name):
         if not isinstance(cells, list) or len(cells) <= NOTE_COL:
             continue
 
-        h_cell = cells[HOSP_COL]
-        h_name = clean_text(h_cell.get("value"))
-        h_color = h_cell.get("color")
+        h_name = clean_text(cells[HOSP_COL].get("value"))
 
         if h_name == target:
             found_name = True
 
-            # ❌ สีไม่ใช่ฟ้า/เหลือง → ข้าม
-            if not is_allowed_color(h_color):
+            # ✅ เช็คสีทั้งแถว
+            if not row_has_allowed_color(cells):
                 continue
 
             partner = str(cells[PART_COL].get("value") or "").strip()
             note = str(cells[NOTE_COL].get("value") or "").strip()
 
-            # ✅ เจอแถวแรกที่สีผ่าน → ใช้ทันที
             return {
                 "status": "success",
                 "data": {
@@ -126,7 +130,6 @@ def get_district_info(district_name):
                 }
             }
 
-    # มีชื่อ แต่ไม่มีฟ้า/เหลืองเลย
     if found_name:
         return {"status": "no_color_match", "hospital": district_name}
 
@@ -138,11 +141,10 @@ def handle_message(event):
     if not sheet_ready:
         return
 
-    raw_text = event.message.text
-    raw_clean = clean_text(raw_text)
+    raw = clean_text(event.message.text)
 
     matched = next(
-        (d for d in BURIRAM_DISTRICTS if clean_text(d) in raw_clean),
+        (d for d in BURIRAM_DISTRICTS if clean_text(d) in raw),
         None
     )
 
