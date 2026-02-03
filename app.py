@@ -17,7 +17,7 @@ BURIRAM_DISTRICTS = [
     "เมืองบุรีรัมย์","คูเมือง","กระสัง","นางรอง","หนองกี่","ละหานทราย",
     "ประโคนชัย","บ้านกรวด","พุทไธสง","ลำปลายมาศ","สตึก","บ้านด่าน",
     "ห้วยราช","โนนสุวรรณ","ปะคำ","นาโพธิ์","หนองหงส์","พลับพลาชัย",
-    "เฉลิมพระเกียรติ","ชำนิ","บ้านใหม่ไชยพจน์","โนนดินแดง","แคนดง",
+    "เฉลิยพระเกียรติ","ชำนิ","บ้านใหม่ไชยพจน์","โนนดินแดง","แคนดง",
     "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
@@ -25,24 +25,20 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== IMPROVED COLOR LOGIC (ครอบคลุมเฉดสีได้มากขึ้น) ==================
+# ================== IMPROVED COLOR LOGIC ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
     c = color_hex.replace("#", "").lower().strip()
     
-    # ✅ รายการรหัสสีเหลือง/ฟ้า ที่พบบ่อยใน Google Sheets
-    # (หมายเหตุ: สีเขียว 00ff00 ถูกถอดออกตามความต้องการของคุณแล้ว)
+    # ✅ อนุญาตเฉพาะสีเหลืองและฟ้า (ข้ามสีเขียว 00ff00 และสีชมพู)
     target_shades = [
-        "ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599", "fff100", # กลุ่มสีเหลือง
-        "00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3", "a2c4c9", "00eeee"  # กลุ่มสีฟ้า
+        "ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599", "fff100", 
+        "00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3", "a2c4c9", "00eeee"
     ]
     
     if c in target_shades: return True
-    
-    # แถม: กรณีสีเหลืองสว่างมากๆ (ตรวจสอบด้วยรหัสสีเบื้องต้น)
     if c.startswith("fff") or (c.startswith("ff") and c.endswith("00")):
         return True
-        
     return False
 
 # ================== API ENDPOINT ==================
@@ -67,7 +63,7 @@ def callback():
         abort(400)
     return "OK"
 
-# ================== SEARCH CORE (ดึงข้อมูล O และ P) ==================
+# ================== SEARCH CORE (แก้ไขจุดที่ทำให้หมายเหตุไม่ตรง) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     HOSP_COL = 10  # คอลัมน์ K
@@ -79,12 +75,11 @@ def get_district_info(district_name):
     if not working_data: return None
 
     try:
-        # เรียงลำดับแถวตามตัวเลข
         row_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
         row_keys = sorted(working_data.keys())
 
-    found_rows = []
+    found_any_name = False 
     for row_idx in row_keys:
         if str(row_idx) == "1": continue 
         cells = working_data[row_idx]
@@ -96,19 +91,21 @@ def get_district_info(district_name):
         h_color = h_cell.get("color")
 
         if target == h_val:
-            # ถ้าเจอชื่ออำเภอตรงกัน ให้เก็บไว้ตรวจสอบสี
-            if is_allowed_color(h_color):
-                partner = str(cells[PART_COL].get("value", "") or "").strip()
-                note = str(cells[NOTE_COL].get("value", "") or "").strip()
-                
-                return {
-                    "status": "success", 
-                    "data": {"hospital": h_val, "partner": partner, "note": note}
-                }
-            else:
-                found_rows.append(h_val)
+            found_any_name = True
+            # ✅ แก้ไขสำคัญ: ถ้าชื่อตรงแต่สี "ไม่ใช่สีเหลือง/ฟ้า" ให้ข้ามไปดูแถวถัดไป
+            if not is_allowed_color(h_color):
+                continue 
+            
+            # ถ้าเจอแถวที่ชื่อตรง และ "สีถูกต้อง" ถึงจะเอาข้อมูลแถวนั้นมาตอบ
+            partner = str(cells[PART_COL].get("value", "") or "").strip()
+            note = str(cells[NOTE_COL].get("value", "") or "").strip()
+            
+            return {
+                "status": "success", 
+                "data": {"hospital": h_val, "partner": partner, "note": note}
+            }
     
-    if found_rows:
+    if found_any_name:
         return {"status": "no_color_match", "hospital": target}
     return None
 
@@ -125,7 +122,7 @@ def handle_message(event):
         if info["status"] == "success":
             res = info["data"]
             
-            # รวมข้อมูลจากคอลัมน์ O (พันธมิตร) และ P (หมายเหตุ)
+            # ดึงข้อมูลจาก O และ P มาแสดงผล
             display_parts = []
             if res['partner'] and res['partner'].lower() != "none":
                 display_parts.append(res['partner'])
