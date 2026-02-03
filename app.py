@@ -99,7 +99,7 @@ def handle(event):
     if status == "NOT_FOUND":
         return
 
-    # ❌ เจอชื่อ แต่สีไม่ใช่ฟ้า/เหลือง
+
     if status == "NO_COLOR":
         hospital = result
         reply = f"ไม่มีรับกลับของ {hospital}"
