@@ -25,7 +25,7 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== COLOR LOGIC (เฉพาะฟ้าและเหลือง) ==================
+# ================== COLOR LOGIC (ปรับปรุงใหม่: เฉพาะเหลืองและฟ้า) ==================
 def hex_to_rgb(hex_color):
     try:
         if not hex_color: return None
@@ -37,13 +37,25 @@ def hex_to_rgb(hex_color):
 
 def is_allowed_color(color_hex):
     if not color_hex: return False
-    rgb = hex_to_rgb(color_hex)
-    if not rgb: return False
+    
+    # ทำความสะอาดค่า Hex
+    clean_hex = color_hex.replace("#", "").lower().strip()
+    
+    # 1. เช็คด้วยรหัส Hex ตรงๆ (แม่นยำที่สุด)
+    # ffff00 = เหลืองสด, 00ffff = ฟ้า/Cyan
+    if clean_hex in ["ffff00", "00ffff"]:
+        return True
 
+    # 2. เช็คด้วยช่วงสี RGB (เผื่อกรณีสีใน Sheet เป็นโทนใกล้เคียงแต่ไม่ใช่โค้ดเป๊ะๆ)
+    rgb = hex_to_rgb(clean_hex)
+    if not rgb: return False
     r, g, b = rgb
-    # 🔵 สีฟ้า และ 🟡 สีเหลือง (ตัดสีชมพูและเขียวออก)
-    is_blue = (b >= 180 and g >= 150)
-    is_yellow = (r >= 200 and g >= 180 and b <= 160)
+
+    # 🟡 สีเหลือง: แดงและเขียวต้องสูง น้ำเงินต้องต่ำมาก
+    is_yellow = (r > 200 and g > 200 and b < 100)
+    
+    # 🔵 สีฟ้า (Cyan): เขียวและน้ำเงินต้องสูง แดงต้องต่ำมาก
+    is_blue = (r < 100 and g > 200 and b > 200)
     
     return is_blue or is_yellow
 
@@ -62,11 +74,10 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE (ดึงข้อมูล O และ P) ==================
+# ================== SEARCH CORE ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     
-    # อ้างอิง Index จากตาราง: K=10, O=14, P=15
     K_INDEX = 10  # HOSPITAL
     O_INDEX = 14  # พันธมิตร
     P_INDEX = 15  # หมายเหตุ
@@ -77,7 +88,6 @@ def get_district_info(district_name):
     if not working_data:
         return None
 
-    # เรียงลำดับแถวเพื่อให้ได้ข้อมูลที่ถูกต้อง
     try:
         sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
@@ -92,11 +102,10 @@ def get_district_info(district_name):
 
         h_cell = cells[K_INDEX]
         h_val = str(h_cell.get("value", "") or "").strip()
+        h_color = h_cell.get("color")
 
-        # ตรวจสอบชื่ออำเภอแบบตรงตัว และต้องเป็นสีฟ้า/เหลืองเท่านั้น
-        if target == h_val and is_allowed_color(h_cell.get("color")):
-            
-            # ดึงข้อมูล พันธมิตร (O) และ หมายเหตุ (P)
+        # ตรวจสอบชื่ออำเภอ และต้องเป็นสีที่อนุญาตเท่านั้น
+        if target == h_val and is_allowed_color(h_color):
             partner = str(cells[O_INDEX].get("value", "") or "").strip()
             note = str(cells[P_INDEX].get("value", "") or "").strip()
 
@@ -126,7 +135,6 @@ def handle_message(event):
         return
 
     raw_text = event.message.text.strip()
-    # ค้นหาอำเภอที่ตรงกับข้อความที่พิมพ์มา
     matched_district = next((d for d in BURIRAM_DISTRICTS if d in raw_text), None)
 
     if not matched_district:
@@ -135,13 +143,11 @@ def handle_message(event):
     info = get_district_info(matched_district)
     
     if info:
-        # รวมข้อมูล พันธมิตร และ หมายเหตุ เข้าด้วยกัน
         details = []
         if info['partner']: details.append(info['partner'])
         if info['note']: details.append(info['note'])
         
         detail_str = f" ({' '.join(details)})" if details else ""
-        
         reply_text = f"มีรับกลับของ {info['hospital']}{detail_str}"
         
         line_bot_api.reply_message(
