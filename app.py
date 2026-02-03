@@ -17,7 +17,7 @@ BURIRAM_DISTRICTS = [
     "เมืองบุรีรัมย์","คูเมือง","กระสัง","นางรอง","หนองกี่","ละหานทราย",
     "ประโคนชัย","บ้านกรวด","พุทไธสง","ลำปลายมาศ","สตึก","บ้านด่าน",
     "ห้วยราช","โนนสุวรรณ","ปะคำ","นาโพธิ์","หนองหงส์","พลับพลาชัย",
-    "เฉลิยพระเกียรติ","ชำนิ","บ้านใหม่ไชยพจน์","โนนดินแดง","แคนดง",
+    "เฉลิมพระเกียรติ","ชำนิ","บ้านใหม่ไชยพจน์","โนนดินแดง","แคนดง",
     "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
@@ -25,21 +25,28 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== IMPROVED COLOR LOGIC ==================
+# ================== UTILS ==================
+def clean_text(txt):
+    return str(txt or "").replace(" ", "").strip().lower()
+
+# ================== COLOR LOGIC (เหลือง + ฟ้า เท่านั้น) ==================
 def is_allowed_color(color_hex):
-    if not color_hex: return False
+    if not color_hex:
+        return False
+
     c = color_hex.replace("#", "").lower().strip()
-    
-    # ✅ อนุญาตเฉพาะสีเหลืองและฟ้า (ข้ามสีเขียว 00ff00 และสีชมพู)
-    target_shades = [
-        "ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599", "fff100", 
-        "00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3", "a2c4c9", "00eeee"
-    ]
-    
-    if c in target_shades: return True
-    if c.startswith("fff") or (c.startswith("ff") and c.endswith("00")):
-        return True
-    return False
+
+    yellow = {
+        "ffff00", "fff2cc", "ffe599",
+        "fff100", "f1c232", "fbef24"
+    }
+
+    blue = {
+        "00ffff", "c9daf8", "a4c2f4",
+        "cfe2f3", "d0e0e3", "a2c4c9"
+    }
+
+    return c in yellow or c in blue
 
 # ================== API ENDPOINT ==================
 @app.route("/update", methods=["POST"])
@@ -48,9 +55,11 @@ def update_sheet():
     data = request.json
     if not data or "full_sheet_data" not in data:
         return "Invalid payload", 400
+
     with data_lock:
         latest_sheet_data = data["full_sheet_data"]
         sheet_ready = True
+
     return "OK", 200
 
 @app.route("/callback", methods=["POST"])
@@ -63,85 +72,111 @@ def callback():
         abort(400)
     return "OK"
 
-# ================== SEARCH CORE (แก้ไขจุดที่ทำให้หมายเหตุไม่ตรง) ==================
+# ================== SEARCH CORE ==================
 def get_district_info(district_name):
-    target = district_name.replace(" ", "").strip()
-    HOSP_COL = 10  # คอลัมน์ K
-    PART_COL = 14  # คอลัมน์ O
-    NOTE_COL = 15  # คอลัมน์ P
+    target = clean_text(district_name)
+
+    HOSP_COL = 10  # K
+    PART_COL = 14  # O
+    NOTE_COL = 15  # P
 
     with data_lock:
         working_data = latest_sheet_data.copy()
-    if not working_data: return None
+
+    if not working_data:
+        return None
 
     try:
         row_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
         row_keys = sorted(working_data.keys())
 
-    found_any_name = False 
+    found_name = False
+
+    # ✅ ไล่จากบน → ล่าง และเอาแถวบนก่อน
     for row_idx in row_keys:
-        if str(row_idx) == "1": continue 
-        cells = working_data[row_idx]
-        
-        if not isinstance(cells, list) or len(cells) <= NOTE_COL: continue
+        if str(row_idx) == "1":
+            continue
+
+        cells = working_data.get(row_idx)
+        if not isinstance(cells, list) or len(cells) <= NOTE_COL:
+            continue
 
         h_cell = cells[HOSP_COL]
-        h_val = str(h_cell.get("value", "") or "").strip()
+        h_val = clean_text(h_cell.get("value"))
         h_color = h_cell.get("color")
 
-        if target == h_val:
-            found_any_name = True
-            # ✅ แก้ไขสำคัญ: ถ้าชื่อตรงแต่สี "ไม่ใช่สีเหลือง/ฟ้า" ให้ข้ามไปดูแถวถัดไป
+        if h_val == target:
+            found_name = True
+
+            # ❌ สีไม่ผ่าน → ข้าม
             if not is_allowed_color(h_color):
-                continue 
-            
-            # ถ้าเจอแถวที่ชื่อตรง และ "สีถูกต้อง" ถึงจะเอาข้อมูลแถวนั้นมาตอบ
-            partner = str(cells[PART_COL].get("value", "") or "").strip()
-            note = str(cells[NOTE_COL].get("value", "") or "").strip()
-            
+                continue
+
+            partner = str(cells[PART_COL].get("value") or "").strip()
+            note = str(cells[NOTE_COL].get("value") or "").strip()
+
+            # ✅ เจอแถวแรกที่ชื่อ + สีผ่าน → ใช้ทันที
             return {
-                "status": "success", 
-                "data": {"hospital": h_val, "partner": partner, "note": note}
+                "status": "success",
+                "data": {
+                    "hospital": district_name,
+                    "partner": partner,
+                    "note": note
+                }
             }
-    
-    if found_any_name:
-        return {"status": "no_color_match", "hospital": target}
+
+    if found_name:
+        return {"status": "no_color_match", "hospital": district_name}
+
     return None
 
 # ================== MESSAGE HANDLER ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    if not sheet_ready: return
+    if not sheet_ready:
+        return
+
     raw_text = event.message.text.strip()
-    matched_district = next((d for d in BURIRAM_DISTRICTS if d in raw_text), None)
-    if not matched_district: return
+    raw_clean = clean_text(raw_text)
+
+    matched_district = next(
+        (d for d in BURIRAM_DISTRICTS if clean_text(d) in raw_clean),
+        None
+    )
+
+    if not matched_district:
+        return
 
     info = get_district_info(matched_district)
-    if info:
-        if info["status"] == "success":
-            res = info["data"]
-            
-            # ดึงข้อมูลจาก O และ P มาแสดงผล
-            display_parts = []
-            if res['partner'] and res['partner'].lower() != "none":
-                display_parts.append(res['partner'])
-            if res['note'] and res['note'].lower() != "none":
-                display_parts.append(res['note'])
-            
-            detail_str = f" ({' '.join(display_parts)})" if display_parts else ""
-            reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
-            
-            line_bot_api.reply_message(
-                event.reply_token,
-                [TextSendMessage(text=reply_text), TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
-            )
-        elif info["status"] == "no_color_match":
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=f"ไม่มีรับกลับของ {info['hospital']}")
-            )
 
+    if info and info["status"] == "success":
+        res = info["data"]
+
+        display_parts = []
+        if res["partner"] and res["partner"].lower() != "none":
+            display_parts.append(res["partner"])
+        if res["note"] and res["note"].lower() != "none":
+            display_parts.append(res["note"])
+
+        detail_str = f" ({' '.join(display_parts)})" if display_parts else ""
+        reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
+
+        line_bot_api.reply_message(
+            event.reply_token,
+            [
+                TextSendMessage(text=reply_text),
+                TextSendMessage(text="ล้อหมุนกี่โมงคะ?")
+            ]
+        )
+
+    elif info and info["status"] == "no_color_match":
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=f"ไม่มีรับกลับของ {info['hospital']}")
+        )
+
+# ================== RUN ==================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
