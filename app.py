@@ -114,7 +114,7 @@ def handle(event):
     text = event.message.text
     status, result = find_hospital_from_text(text)
 
-    # ❌ ไม่พบชื่อโรงพยาบาลในข้อความ user
+   
     if status == "NOT_FOUND":
         return
 
