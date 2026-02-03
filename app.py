@@ -23,15 +23,17 @@ def is_allowed_color(color):
     if not color:
         return False
 
-    c = color.replace("#", "").lower()
+    c = str(color).replace("#", "").lower()
 
     yellow = {
-        "ffff00", "fff2cc", "ffe599",
-        "fff100", "f1c232", "fbef24"
+        "ffff00", "fff2cc", "ffe599", "fff100",
+        "f1c232", "fbef24", "fff9c4"
     }
+
     blue = {
         "00ffff", "c9daf8", "a4c2f4",
-        "cfe2f3", "d0e0e3", "a2c4c9"
+        "cfe2f3", "d0e0e3", "a2c4c9",
+        "9fc5e8", "bcd4e6"
     }
 
     return c in yellow or c in blue
@@ -40,7 +42,7 @@ def is_allowed_color(color):
 @app.route("/update", methods=["POST"])
 def update():
     global latest_rows, sheet_ready
-    data = request.json
+    data = request.json or {}
 
     with lock:
         latest_rows = data.get("rows", [])
@@ -70,12 +72,28 @@ def find_hospital_from_text(text):
 
     rows.sort(key=lambda r: r.get("row_no", 0))
 
+    best_match = None
+
     for row in rows:
         hospital_name = row.get("hospital", "")
-        if clean(hospital_name) and clean(hospital_name) in target_text:
+        if not hospital_name:
+            continue
 
-            if not is_allowed_color(row.get("row_color")):
+        name_clean = clean(hospital_name)
+
+        # ✅ ถ้าชื่อโรงพยาบาลอยู่ในประโยค user
+        if name_clean and name_clean in target_text:
+
+            color = row.get("row_color")
+
+            print("MATCH HOSPITAL:", hospital_name)
+            print("COLOR FOUND:", color)
+
+            if not is_allowed_color(color):
+                print("❌ COLOR NOT ALLOWED")
                 return "NO_COLOR", hospital_name
+
+            print("✅ COLOR OK")
 
             return "OK", {
                 "hospital": hospital_name,
@@ -83,22 +101,24 @@ def find_hospital_from_text(text):
                 "note": row.get("note", "").strip()
             }
 
+    print("❌ NO MATCH FOUND")
     return "NOT_FOUND", None
 
 # ================= LINE HANDLER =================
 @handler.add(MessageEvent, message=TextMessage)
 def handle(event):
     if not sheet_ready:
+        print("⚠️ SHEET NOT READY")
         return
 
     text = event.message.text
     status, result = find_hospital_from_text(text)
 
-  
+    # ❌ ไม่พบชื่อโรงพยาบาลในข้อความ user
     if status == "NOT_FOUND":
         return
 
-
+    # ❌ พบชื่อ แต่สีไม่ผ่าน
     if status == "NO_COLOR":
         hospital = result
         reply = f"ไม่มีรับกลับของ {hospital}"
@@ -109,7 +129,7 @@ def handle(event):
         )
         return
 
-
+    # ✅ สีผ่าน
     if status == "OK":
         hospital = result["hospital"]
         parts = []
