@@ -29,7 +29,7 @@ data_lock = threading.Lock()
 def clean_text(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-# ================== COLOR LOGIC (เหลือง + ฟ้า เท่านั้น) ==================
+# ================== COLOR LOGIC (ฟ้า + เหลือง เท่านั้น) ==================
 def is_allowed_color(color_hex):
     if not color_hex:
         return False
@@ -81,42 +81,42 @@ def get_district_info(district_name):
     NOTE_COL = 15  # P
 
     with data_lock:
-        working_data = latest_sheet_data.copy()
+        data = latest_sheet_data.copy()
 
-    if not working_data:
+    if not data:
         return None
 
     try:
-        row_keys = sorted(working_data.keys(), key=lambda x: int(x))
+        row_keys = sorted(data.keys(), key=lambda x: int(x))
     except:
-        row_keys = sorted(working_data.keys())
+        row_keys = sorted(data.keys())
 
     found_name = False
 
-    # ✅ ไล่จากบน → ล่าง และเอาแถวบนก่อน
-    for row_idx in row_keys:
-        if str(row_idx) == "1":
+    # 🔑 ไล่จากบน → ล่าง และเอาแถวบนสุดที่เป็น ฟ้า/เหลือง
+    for row in row_keys:
+        if str(row) == "1":
             continue
 
-        cells = working_data.get(row_idx)
+        cells = data.get(row)
         if not isinstance(cells, list) or len(cells) <= NOTE_COL:
             continue
 
         h_cell = cells[HOSP_COL]
-        h_val = clean_text(h_cell.get("value"))
+        h_name = clean_text(h_cell.get("value"))
         h_color = h_cell.get("color")
 
-        if h_val == target:
+        if h_name == target:
             found_name = True
 
-            # ❌ สีไม่ผ่าน → ข้าม
+            # ❌ สีไม่ใช่ฟ้า/เหลือง → ข้าม
             if not is_allowed_color(h_color):
                 continue
 
             partner = str(cells[PART_COL].get("value") or "").strip()
             note = str(cells[NOTE_COL].get("value") or "").strip()
 
-            # ✅ เจอแถวแรกที่ชื่อ + สีผ่าน → ใช้ทันที
+            # ✅ เจอแถวแรกที่สีผ่าน → ใช้ทันที
             return {
                 "status": "success",
                 "data": {
@@ -126,6 +126,7 @@ def get_district_info(district_name):
                 }
             }
 
+    # มีชื่อ แต่ไม่มีฟ้า/เหลืองเลย
     if found_name:
         return {"status": "no_color_match", "hospital": district_name}
 
@@ -137,35 +138,35 @@ def handle_message(event):
     if not sheet_ready:
         return
 
-    raw_text = event.message.text.strip()
+    raw_text = event.message.text
     raw_clean = clean_text(raw_text)
 
-    matched_district = next(
+    matched = next(
         (d for d in BURIRAM_DISTRICTS if clean_text(d) in raw_clean),
         None
     )
 
-    if not matched_district:
+    if not matched:
         return
 
-    info = get_district_info(matched_district)
+    info = get_district_info(matched)
 
     if info and info["status"] == "success":
         res = info["data"]
 
-        display_parts = []
-        if res["partner"] and res["partner"].lower() != "none":
-            display_parts.append(res["partner"])
-        if res["note"] and res["note"].lower() != "none":
-            display_parts.append(res["note"])
+        parts = []
+        if res["partner"]:
+            parts.append(res["partner"])
+        if res["note"]:
+            parts.append(res["note"])
 
-        detail_str = f" ({' '.join(display_parts)})" if display_parts else ""
-        reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
+        detail = f" ({' '.join(parts)})" if parts else ""
+        reply = f"มีรับกลับของ {res['hospital']}{detail}"
 
         line_bot_api.reply_message(
             event.reply_token,
             [
-                TextSendMessage(text=reply_text),
+                TextSendMessage(text=reply),
                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")
             ]
         )
