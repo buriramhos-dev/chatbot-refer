@@ -11,6 +11,7 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
+# ================= CONFIG =================
 BURIRAM_DISTRICTS = [
     "เมืองบุรีรัมย์","คูเมือง","กระสัง","นางรอง","หนองกี่","ละหานทราย",
     "ประโคนชัย","บ้านกรวด","พุทไธสง","ลำปลายมาศ","สตึก","บ้านด่าน",
@@ -19,68 +20,88 @@ BURIRAM_DISTRICTS = [
     "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
 ]
 
-latest_sheet_data = {}
+latest_rows = []
 sheet_ready = False
 lock = threading.Lock()
 
+# ================= UTILS =================
 def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
 def is_allowed_color(color):
     if not color:
         return False
+
     c = color.replace("#", "").lower()
-    yellow = {"ffff00","fff2cc","ffe599","fff100","f1c232","fbef24"}
-    blue = {"00ffff","c9daf8","a4c2f4","cfe2f3","d0e0e3","a2c4c9"}
+
+    yellow = {
+        "ffff00", "fff2cc", "ffe599",
+        "fff100", "f1c232", "fbef24"
+    }
+    blue = {
+        "00ffff", "c9daf8", "a4c2f4",
+        "cfe2f3", "d0e0e3", "a2c4c9"
+    }
     return c in yellow or c in blue
 
-def row_has_allowed_color(cells):
-    for cell in cells:
-        if is_allowed_color(cell.get("color")):
-            return True
-    return False
-
+# ================= API =================
 @app.route("/update", methods=["POST"])
 def update():
-    global latest_sheet_data, sheet_ready
+    global latest_rows, sheet_ready
     data = request.json
+
     with lock:
-        latest_sheet_data = data.get("full_sheet_data", {})
+        latest_rows = data.get("rows", [])
         sheet_ready = True
+
+    print("SYNC ROWS:", len(latest_rows))
     return "OK"
 
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature")
     body = request.get_data(as_text=True)
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
+
     return "OK"
 
-def find_hospital(name):
-    target = clean(name)
+# ================= CORE LOGIC =================
+def find_hospital(hospital_name):
+    target = clean(hospital_name)
 
     with lock:
-        data = latest_sheet_data.copy()
+        rows = list(latest_rows)
 
-    for row in sorted(data.keys(), key=lambda x: int(x)):
-        cells = data[row]
-        if clean(cells[10]["value"]) != target:
+    found_name = False
+
+    # ไล่จากบนลงล่าง (row_no น้อยก่อน)
+    rows.sort(key=lambda r: r.get("row_no", 0))
+
+    for row in rows:
+        if clean(row.get("hospital")) != target:
             continue
 
-        # ⭐ หัวใจของระบบ
-        if not row_has_allowed_color(cells):
+        found_name = True
+
+        if not is_allowed_color(row.get("row_color")):
             continue
 
-        partner = str(cells[14]["value"] or "").strip()
-        note = str(cells[15]["value"] or "").strip()
+        return {
+            "hospital": hospital_name,
+            "partner": row.get("partner", ""),
+            "note": row.get("note", "")
+        }
 
-        return partner, note
+    if found_name:
+        return "NO_COLOR"
 
     return None
 
+# ================= LINE HANDLER =================
 @handler.add(MessageEvent, message=TextMessage)
 def handle(event):
     if not sheet_ready:
@@ -88,30 +109,36 @@ def handle(event):
 
     text = clean(event.message.text)
     hospital = next((h for h in BURIRAM_DISTRICTS if clean(h) in text), None)
+
     if not hospital:
         return
 
     result = find_hospital(hospital)
 
-    if result:
-        partner, note = result
-        extra = " ".join(p for p in [partner, note] if p)
-        msg = f"มีรับกลับของ {hospital}"
-        if extra:
-            msg += f" ({extra})"
+    if isinstance(result, dict):
+        parts = []
+        if result["partner"]:
+            parts.append(result["partner"])
+        if result["note"]:
+            parts.append(result["note"])
+
+        detail = f" ({' '.join(parts)})" if parts else ""
+        reply = f"มีรับกลับของ {hospital}{detail}"
 
         line_bot_api.reply_message(
             event.reply_token,
             [
-                TextSendMessage(text=msg),
+                TextSendMessage(text=reply),
                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")
             ]
         )
+
     else:
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=f"ไม่มีรับกลับของ {hospital}")
         )
 
+# ================= RUN =================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
