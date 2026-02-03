@@ -25,16 +25,25 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== STRICT COLOR LOGIC (ถอดสีเขียวออกแล้ว) ==================
+# ================== IMPROVED COLOR LOGIC (ครอบคลุมเฉดสีได้มากขึ้น) ==================
 def is_allowed_color(color_hex):
     if not color_hex: return False
     c = color_hex.replace("#", "").lower().strip()
     
-    # ✅ อนุญาตเฉพาะสีเหลืองและสีฟ้า (ถอด 00ff00 ออกเพื่อให้ข้ามสีเขียว)
-    yellow_shades = ["ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599"]
-    blue_shades = ["00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3", "a2c4c9"]
-
-    return (c in yellow_shades) or (c in blue_shades)
+    # ✅ รายการรหัสสีเหลือง/ฟ้า ที่พบบ่อยใน Google Sheets
+    # (หมายเหตุ: สีเขียว 00ff00 ถูกถอดออกตามความต้องการของคุณแล้ว)
+    target_shades = [
+        "ffff00", "fff2cc", "fce5cd", "fbef24", "f1c232", "ffe599", "fff100", # กลุ่มสีเหลือง
+        "00ffff", "c9daf8", "a4c2f4", "cfe2f3", "d0e0e3", "a2c4c9", "00eeee"  # กลุ่มสีฟ้า
+    ]
+    
+    if c in target_shades: return True
+    
+    # แถม: กรณีสีเหลืองสว่างมากๆ (ตรวจสอบด้วยรหัสสีเบื้องต้น)
+    if c.startswith("fff") or (c.startswith("ff") and c.endswith("00")):
+        return True
+        
+    return False
 
 # ================== API ENDPOINT ==================
 @app.route("/update", methods=["POST"])
@@ -58,28 +67,28 @@ def callback():
         abort(400)
     return "OK"
 
-# ================== SEARCH CORE (ปรับตำแหน่งคอลัมน์ O P) ==================
+# ================== SEARCH CORE (ดึงข้อมูล O และ P) ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
-    HOSP_COL = 10  # คอลัมน์ K (HOSPITAL)
-    PART_COL = 14  # คอลัมน์ O (พันธมิตร)
-    NOTE_COL = 15  # คอลัมน์ P (หมายเหตุ)
+    HOSP_COL = 10  # คอลัมน์ K
+    PART_COL = 14  # คอลัมน์ O
+    NOTE_COL = 15  # คอลัมน์ P
 
     with data_lock:
         working_data = latest_sheet_data.copy()
     if not working_data: return None
 
     try:
-        sorted_keys = sorted(working_data.keys(), key=lambda x: int(x))
+        # เรียงลำดับแถวตามตัวเลข
+        row_keys = sorted(working_data.keys(), key=lambda x: int(x))
     except:
-        sorted_keys = sorted(working_data.keys())
+        row_keys = sorted(working_data.keys())
 
-    found_any_name = False 
-    for row_idx in sorted_keys:
+    found_rows = []
+    for row_idx in row_keys:
         if str(row_idx) == "1": continue 
         cells = working_data[row_idx]
         
-        # ตรวจสอบว่ามีข้อมูลถึงคอลัมน์ P หรือไม่
         if not isinstance(cells, list) or len(cells) <= NOTE_COL: continue
 
         h_cell = cells[HOSP_COL]
@@ -87,22 +96,19 @@ def get_district_info(district_name):
         h_color = h_cell.get("color")
 
         if target == h_val:
-            found_any_name = True
-            # ตรวจสี: ถ้าเป็นสีเขียว บอทจะข้ามไป (ไม่เข้าเงื่อนไข success)
+            # ถ้าเจอชื่ออำเภอตรงกัน ให้เก็บไว้ตรวจสอบสี
             if is_allowed_color(h_color):
                 partner = str(cells[PART_COL].get("value", "") or "").strip()
                 note = str(cells[NOTE_COL].get("value", "") or "").strip()
                 
                 return {
                     "status": "success", 
-                    "data": {
-                        "hospital": h_val, 
-                        "partner": partner, 
-                        "note": note
-                    }
+                    "data": {"hospital": h_val, "partner": partner, "note": note}
                 }
+            else:
+                found_rows.append(h_val)
     
-    if found_any_name:
+    if found_rows:
         return {"status": "no_color_match", "hospital": target}
     return None
 
@@ -119,21 +125,19 @@ def handle_message(event):
         if info["status"] == "success":
             res = info["data"]
             
-            # ดึงข้อมูลจาก O และ P มาตอบ
-            extra_info = []
+            # รวมข้อมูลจากคอลัมน์ O (พันธมิตร) และ P (หมายเหตุ)
+            display_parts = []
             if res['partner'] and res['partner'].lower() != "none":
-                extra_info.append(res['partner'])
+                display_parts.append(res['partner'])
             if res['note'] and res['note'].lower() != "none":
-                extra_info.append(res['note'])
+                display_parts.append(res['note'])
             
-            # จัดรูปแบบข้อความในวงเล็บให้สวยงาม
-            detail_str = f" ({' '.join(extra_info)})" if extra_info else ""
+            detail_str = f" ({' '.join(display_parts)})" if display_parts else ""
             reply_text = f"มีรับกลับของ {res['hospital']}{detail_str}"
             
             line_bot_api.reply_message(
                 event.reply_token,
-                [TextSendMessage(text=reply_text), 
-                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
+                [TextSendMessage(text=reply_text), TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
             )
         elif info["status"] == "no_color_match":
             line_bot_api.reply_message(
