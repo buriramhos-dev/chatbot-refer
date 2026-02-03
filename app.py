@@ -21,7 +21,7 @@ BURIRAM_DISTRICTS = [
 ]
 
 DISTRICT_MAP = {
-    "".join(d.split()).lower(): d for d in BURIRAM_DISTRICTS
+    "".join(h.split()).lower(): h for h in BURIRAM_DISTRICTS
 }
 
 latest_rows = []
@@ -32,19 +32,16 @@ lock = threading.Lock()
 def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
-# ✅ เช็กเฉพาะสีฟ้า + เหลือง (แบบทนทุก hex)
+# ✅ เช็กเฉพาะ “ฟ้า + เหลือง” (ครอบคลุมสีจริงจาก Sheet)
 def is_blue_or_yellow(color):
-    if not color:
-        return False
+    c = str(color or "").lower()
 
-    c = color.lower()
+    # ฟ้า / ฟ้าอมเขียว
+    if c.startswith("#00b0") or c.startswith("#00ff") or c == "#00ffff":
+        return True
 
     # เหลือง
     if c.startswith("#ffff"):
-        return True
-
-    # ฟ้า / cyan / ฟ้าอ่อน (Sheets ใช้บ่อย)
-    if c.startswith("#00") or c.startswith("#66") or c.startswith("#99"):
         return True
 
     return False
@@ -55,13 +52,8 @@ def update():
     global latest_rows, sheet_ready
     data = request.json or {}
 
-    rows = [
-        r for r in data.get("rows", [])
-        if r.get("hospital")
-    ]
-
     with lock:
-        latest_rows = rows
+        latest_rows = data.get("rows", [])
         sheet_ready = True
 
     print("SYNC ROWS:", len(latest_rows))
@@ -79,15 +71,15 @@ def callback():
 
     return "OK"
 
-# ================= CORE =================
+# ================= CORE LOGIC =================
 def find_hospital(hospital_name):
     target = clean(hospital_name)
 
     with lock:
         rows = list(latest_rows)
 
-    found = False
     rows.sort(key=lambda r: r.get("row_no", 0))
+    found = False
 
     for row in rows:
         if clean(row.get("hospital")) != target:
@@ -95,7 +87,7 @@ def find_hospital(hospital_name):
 
         found = True
 
-        # ✅ รับเฉพาะสีฟ้า + เหลือง
+        # ✅ กรองเฉพาะสีฟ้า + เหลือง
         if not is_blue_or_yellow(row.get("color")):
             continue
 
@@ -110,7 +102,7 @@ def find_hospital(hospital_name):
 
     return None
 
-# ================= LINE =================
+# ================= LINE HANDLER =================
 @handler.add(MessageEvent, message=TextMessage)
 def handle(event):
     if not sheet_ready:
@@ -136,12 +128,11 @@ def handle(event):
             parts.append(result["note"])
 
         detail = f" ({' '.join(parts)})" if parts else ""
-        reply = f"มีรับกลับของ {hospital}{detail}"
 
         line_bot_api.reply_message(
             event.reply_token,
             [
-                TextSendMessage(text=reply),
+                TextSendMessage(text=f"มีรับกลับของ {hospital}{detail}"),
                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")
             ]
         )
