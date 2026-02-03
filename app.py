@@ -11,6 +11,20 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
+# ================= CONFIG =================
+BURIRAM_DISTRICTS = [
+    "เมืองบุรีรัมย์","คูเมือง","กระสัง","นางรอง","หนองกี่","ละหานทราย",
+    "ประโคนชัย","บ้านกรวด","พุทไธสง","ลำปลายมาศ","สตึก","บ้านด่าน",
+    "ห้วยราช","โนนสุวรรณ","ปะคำ","นาโพธิ์","หนองหงส์","พลับพลาชัย",
+    "เฉลิมพระเกียรติ","ชำนิ","บ้านใหม่ไชยพจน์","โนนดินแดง","แคนดง",
+    "ลำทะเมนชัย","เมืองยาง","ชุมพวง"
+]
+
+# ✅ map ชื่ออำเภอแบบ clean
+DISTRICT_MAP = { 
+    "".join(h.split()).lower(): h for h in BURIRAM_DISTRICTS 
+}
+
 latest_rows = []
 sheet_ready = False
 lock = threading.Lock()
@@ -19,17 +33,27 @@ lock = threading.Lock()
 def clean(txt):
     return str(txt or "").replace(" ", "").strip().lower()
 
+# ✅ เช็กเฉพาะสีฟ้า + เหลือง
+def is_blue_or_yellow(color):
+    c = str(color or "").strip().lower()
+    return c in [
+        "blue", "yellow",
+        "ฟ้า", "เหลือง",
+        "#00b0f0",   # ฟ้า
+        "#ffff00"    # เหลือง
+    ]
+
 # ================= API =================
 @app.route("/update", methods=["POST"])
 def update():
     global latest_rows, sheet_ready
-    data = request.json or {}
+    data = request.json
 
     with lock:
         latest_rows = data.get("rows", [])
         sheet_ready = True
 
-    print("✅ SYNC ROWS:", len(latest_rows))
+    print("SYNC ROWS:", len(latest_rows))
     return "OK"
 
 @app.route("/callback", methods=["POST"])
@@ -45,31 +69,33 @@ def callback():
     return "OK"
 
 # ================= CORE LOGIC =================
-def find_hospital_by_query(query_text):
-    query = clean(query_text)
+def find_hospital(hospital_name):
+    target = clean(hospital_name)
 
     with lock:
         rows = list(latest_rows)
 
-    # เรียงจากบนลงล่าง
+    found_name = False
     rows.sort(key=lambda r: r.get("row_no", 0))
 
     for row in rows:
-        hospital_name = clean(row.get("hospital"))
-
-        # ✅ ใช้คำที่ user พิมพ์ ไปค้นชื่อ รพ.
-        if query not in hospital_name:
+        if clean(row.get("hospital")) != target:
             continue
 
-        # ✅ ต้องเป็นแถวที่รับกลับ (ฟ้า / เหลือง)
-        if not row.get("has_accept", False):
+        found_name = True
+
+        # ✅ ตอบเฉพาะสีฟ้า + เหลือง
+        if not is_blue_or_yellow(row.get("color")):
             continue
 
         return {
-            "hospital": row.get("hospital"),
+            "hospital": hospital_name,
             "partner": row.get("partner", ""),
             "note": row.get("note", "")
         }
+
+    if found_name:
+        return "NO_ACCEPT"
 
     return None
 
@@ -79,8 +105,18 @@ def handle(event):
     if not sheet_ready:
         return
 
-    user_text = event.message.text
-    result = find_hospital_by_query(user_text)
+    text = clean(event.message.text)
+
+    # ✅ หาอำเภอแบบไม่พลาด
+    hospital = next(
+        (real for key, real in DISTRICT_MAP.items() if key in text),
+        None
+    )
+
+    if not hospital:
+        return
+
+    result = find_hospital(hospital)
 
     if isinstance(result, dict):
         parts = []
@@ -90,20 +126,19 @@ def handle(event):
             parts.append(result["note"])
 
         detail = f" ({' '.join(parts)})" if parts else ""
+        reply = f"มีรับกลับของ {hospital}{detail}"
 
         line_bot_api.reply_message(
             event.reply_token,
             [
-                TextSendMessage(
-                    text=f"มีรับกลับของ {result['hospital']}{detail}"
-                ),
+                TextSendMessage(text=reply),
                 TextSendMessage(text="ล้อหมุนกี่โมงคะ?")
             ]
         )
     else:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="ไม่มีรับกลับค่ะ")
+            TextSendMessage(text=f"ไม่มีรับกลับของ {hospital}")
         )
 
 # ================= RUN =================
