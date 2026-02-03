@@ -25,15 +25,27 @@ def is_allowed_color(color):
 
     c = str(color).replace("#", "").lower()
 
+    # ✅ สีเหลืองที่อนุญาต
     yellow = {
-        "ffff00", "fff2cc", "ffe599", "fff100",
-        "f1c232", "fbef24", "fff9c4"
+        "ffff00",  # เหลืองสด
+        "fff2cc",
+        "ffe599",
+        "fff100",
+        "f1c232",
+        "fbef24",
+        "fff9c4"
     }
 
+    # ✅ สีฟ้าที่อนุญาต
     blue = {
-        "00ffff", "c9daf8", "a4c2f4",
-        "cfe2f3", "d0e0e3", "a2c4c9",
-        "9fc5e8", "bcd4e6"
+        "00ffff",
+        "c9daf8",
+        "a4c2f4",
+        "cfe2f3",
+        "d0e0e3",
+        "a2c4c9",
+        "9fc5e8",
+        "bcd4e6"
     }
 
     return c in yellow or c in blue
@@ -48,7 +60,7 @@ def update():
         latest_rows = data.get("rows", [])
         sheet_ready = True
 
-    print("SYNC ROWS:", len(latest_rows))
+    print("✅ SYNC ROWS:", len(latest_rows))
     return "OK"
 
 @app.route("/callback", methods=["POST"])
@@ -72,7 +84,8 @@ def find_hospital_from_text(text):
 
     rows.sort(key=lambda r: r.get("row_no", 0))
 
-    best_match = None
+    found_valid = []
+    found_name_only = None
 
     for row in rows:
         hospital_name = row.get("hospital", "")
@@ -81,27 +94,33 @@ def find_hospital_from_text(text):
 
         name_clean = clean(hospital_name)
 
-        # ✅ ถ้าชื่อโรงพยาบาลอยู่ในประโยค user
+        # ✅ ถ้าชื่อโรงพยาบาลอยู่ในข้อความ user
         if name_clean and name_clean in target_text:
-
             color = row.get("row_color")
 
-            print("MATCH HOSPITAL:", hospital_name)
-            print("COLOR FOUND:", color)
+            print("MATCH:", hospital_name, "COLOR:", color)
 
+            # ถ้าพบชื่อ แต่สีไม่ผ่าน เก็บไว้เผื่อ fallback
             if not is_allowed_color(color):
-                print("❌ COLOR NOT ALLOWED")
-                return "NO_COLOR", hospital_name
+                found_name_only = hospital_name
+                continue
 
-            print("✅ COLOR OK")
-
-            return "OK", {
+            # ถ้าสีผ่าน เก็บเป็นตัวเลือกที่ใช้ได้
+            found_valid.append({
                 "hospital": hospital_name,
                 "partner": row.get("partner", "").strip(),
                 "note": row.get("note", "").strip()
-            }
+            })
 
-    print("❌ NO MATCH FOUND")
+    # ✅ ถ้ามีแถวที่สีผ่าน อย่างน้อย 1 แถว
+    if found_valid:
+        return "OK", found_valid[0]
+
+    # ❌ พบชื่อ แต่สีไม่ผ่านทั้งหมด
+    if found_name_only:
+        return "NO_COLOR", found_name_only
+
+    # ❌ ไม่พบเลย
     return "NOT_FOUND", None
 
 # ================= LINE HANDLER =================
@@ -114,7 +133,7 @@ def handle(event):
     text = event.message.text
     status, result = find_hospital_from_text(text)
 
-   
+    # ❌ ไม่พบชื่อโรงพยาบาล
     if status == "NOT_FOUND":
         return
 
