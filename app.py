@@ -25,7 +25,7 @@ latest_sheet_data = {}
 sheet_ready = False
 data_lock = threading.Lock()
 
-# ================== COLOR LOGIC ==================
+# ================== COLOR LOGIC (ปรับให้ยืดหยุ่นตามรูปถ่าย) ==================
 def hex_to_rgb(hex_color):
     try:
         if not hex_color: return None
@@ -39,7 +39,7 @@ def is_allowed_color(color_hex):
     if not color_hex: return False
     clean_hex = color_hex.replace("#", "").lower().strip()
     
-    # เช็คแบบตรงตัว (เหลืองสด #ffff00 และ ฟ้า Cyan #00ffff)
+    # เช็คแบบ Hex ตรงตัวก่อน
     if clean_hex in ["ffff00", "00ffff"]:
         return True
 
@@ -47,8 +47,13 @@ def is_allowed_color(color_hex):
     if not rgb: return False
     r, g, b = rgb
 
-    is_yellow = (r > 200 and g > 200 and b < 100) # 🟡
-    is_blue = (r < 100 and g > 200 and b > 200)   # 🔵
+    # 🟡 สีเหลือง (Yellow Tone): แดงกับเขียวต้องเด่น น้ำเงินต้องต่ำ
+    # ปรับเกณฑ์ให้กว้างขึ้นเพื่อรับสีเหลืองสว่างๆ
+    is_yellow = (r > 180 and g > 180 and b < 160)
+    
+    # 🔵 สีฟ้า (Cyan Tone): เขียวกับน้ำเงินต้องเด่น แดงต้องต่ำ
+    # ปรับเกณฑ์ให้กว้างขึ้นตามรูปภาพ
+    is_blue = (g > 150 and b > 180 and r < 180)
     
     return is_blue or is_yellow
 
@@ -67,7 +72,7 @@ def update_sheet():
     print(f"✅ ข้อมูลซิงค์สำเร็จ: {len(latest_sheet_data)} แถว")
     return "OK", 200
 
-# ================== SEARCH CORE (แก้ไขใหม่) ==================
+# ================== SEARCH CORE ==================
 def get_district_info(district_name):
     target = district_name.replace(" ", "").strip()
     
@@ -86,7 +91,6 @@ def get_district_info(district_name):
     except:
         sorted_keys = working_data.keys()
 
-    # ใช้เก็บสถานะว่าเจอชื่อในตารางบ้างไหม (แต่สีอาจจะไม่ใช่)
     found_name_match = False
 
     for row_idx in sorted_keys:
@@ -101,9 +105,9 @@ def get_district_info(district_name):
         h_color = h_cell.get("color")
 
         if target == h_val:
-            found_name_match = True # ยืนยันว่าเจอชื่อโรงพยาบาลนี้ในชีท
+            found_name_match = True 
             
-            # ถ้าชื่อตรง และสีตรงตามเงื่อนไข (ฟ้า/เหลือง)
+            # ตรวจสอบสี ถ้าผ่านเงื่อนไขให้รีบส่งค่ากลับทันที
             if is_allowed_color(h_color):
                 partner = str(cells[O_INDEX].get("value", "") or "").strip()
                 note = str(cells[P_INDEX].get("value", "") or "").strip()
@@ -114,9 +118,8 @@ def get_district_info(district_name):
                     "partner": partner,
                     "note": note
                 }
-            # ถ้าสีไม่ตรง จะไม่ return แต่จะวนหาบรรทัดถัดไปต่อ เผื่อมีบันทึกซ้ำ
     
-    # ถ้าวนจนจบแล้วยังไม่เจอ Success แต่เคยเจอชื่อที่สีไม่ตรง
+    # ถ้าวนหาจนครบทุกแถวแล้วไม่เจอแถวที่สีตรง
     if found_name_match:
         return {"status": "no_color_match", "hospital": target}
     
@@ -133,7 +136,7 @@ def callback():
         abort(400)
     return "OK"
 
-# ================== MESSAGE HANDLER (แก้ไขการตอบกลับ) ==================
+# ================== MESSAGE HANDLER ==================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     if not sheet_ready:
@@ -162,7 +165,6 @@ def handle_message(event):
                  TextSendMessage(text="ล้อหมุนกี่โมงคะ?")]
             )
         elif info["status"] == "no_color_match":
-            # กรณีเจอชื่อในตาราง แต่สีช่องโรงพยาบาลไม่ใช่ฟ้าหรือเหลือง
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text=f"ไม่มีรับกลับของ {info['hospital']}")
